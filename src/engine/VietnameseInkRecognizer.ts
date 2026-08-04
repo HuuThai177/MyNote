@@ -15,7 +15,7 @@ export interface InkRecognitionResult {
 
 /**
  * Dual-Engine Vietnamese Digital Ink Recognition System:
- * 1. Online Google Digital Ink Recognition Web API ('vi') for 100% accurate web handwriting.
+ * 1. Online Google Digital Ink Recognition Web API ('vi') with Stroke Normalization.
  * 2. Native Android Google ML Kit Kotlin Module on Android devices.
  * 3. Offline Heuristic Lexicon Fallback when offline.
  */
@@ -66,6 +66,7 @@ export class VietnameseInkRecognizer {
 
   /**
    * Async Recognition Engine using Google Digital Ink Web API ('vi' language tag)
+   * Includes Stroke Geometry Normalization for maximum handwriting precision
    */
   public static async recognizeStrokesAsync(strokes: Stroke[]): Promise<InkRecognitionResult> {
     if (strokes.length === 0) {
@@ -76,7 +77,13 @@ export class VietnameseInkRecognizer {
     const strokeIds = strokes.map(s => s.id);
 
     try {
-      // Format stroke points into Google Ink API structure: [[[x...], [y...], [t...]]]
+      // Normalize stroke points relative to bounding box origin for consistent AI accuracy
+      const minX = bbox.x;
+      const minY = bbox.y;
+      const scaleX = 800 / Math.max(10, bbox.width);
+      const scaleY = 600 / Math.max(10, bbox.height);
+      const targetScale = Math.min(scaleX, scaleY);
+
       const inkData = strokes.map(s => {
         const xs: number[] = [];
         const ys: number[] = [];
@@ -84,8 +91,8 @@ export class VietnameseInkRecognizer {
         const baseTime = s.points[0]?.time || Date.now();
 
         s.points.forEach(p => {
-          xs.push(Math.round(p.x));
-          ys.push(Math.round(p.y));
+          xs.push(Math.round((p.x - minX) * targetScale));
+          ys.push(Math.round((p.y - minY) * targetScale));
           ts.push(Math.round(p.time ? p.time - baseTime : 0));
         });
 
@@ -99,7 +106,7 @@ export class VietnameseInkRecognizer {
           options: 'enable_homophone_converter',
           requests: [
             {
-              writing_guide: { writing_area_width: Math.max(800, bbox.width + 200), writing_area_height: Math.max(600, bbox.height + 200) },
+              writing_guide: { writing_area_width: 800, writing_area_height: 600 },
               ink: inkData,
               language: 'vi'
             }

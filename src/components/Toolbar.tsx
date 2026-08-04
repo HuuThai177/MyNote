@@ -10,7 +10,10 @@ import {
   Palette,
   Sliders,
   ChevronDown,
-  Check
+  ChevronUp,
+  Check,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { ToolType, VIETNAMESE_HANDWRITING_FONTS } from '../types/notebook';
 
@@ -59,9 +62,25 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onToggleSmartShape
 }) => {
   const [showFontPicker, setShowFontPicker] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  if (isCollapsed) {
+    return (
+      <div className="absolute top-18 right-4 z-40 animate-pop">
+        <button
+          onClick={() => setIsCollapsed(false)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass-panel text-indigo-400 hover:text-white font-bold text-xs shadow-xl border border-indigo-500/40 hover:bg-indigo-600 transition"
+          title="Hiện thanh công cụ vẽ"
+        >
+          <Eye className="w-4 h-4" />
+          <span>Hiện Thanh Công Cụ</span>
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="w-full glass-toolbar px-4 py-2 flex flex-wrap items-center justify-between gap-3 z-30 border-b border-slate-700/60 shadow-lg">
+    <div className="w-full glass-toolbar px-4 py-2 flex flex-wrap items-center justify-between gap-3 z-30 border-b border-slate-700/60 shadow-lg relative transition-all">
       {/* 1. GoodNotes Main Tool Selector */}
       <div className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-2xl border border-slate-800 shadow-inner">
         {/* Fountain Pen */}
@@ -162,45 +181,56 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         ))}
       </div>
 
-      {/* 5. Vietnamese Font Family Selector */}
-      <div className="relative">
-        <button
-          onClick={() => setShowFontPicker(!showFontPicker)}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800/90 text-slate-200 border border-slate-700 text-xs font-semibold hover:bg-slate-700 transition"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          <span className="truncate max-w-[110px]">
-            {VIETNAMESE_HANDWRITING_FONTS.find(f => f.family === fontFamily)?.name.split(' ')[0] || 'Font'}
-          </span>
-          <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-        </button>
+      {/* 5. Vietnamese Font Family Selector & Hide Toolbar Button */}
+      <div className="flex items-center gap-2">
+        <div className="relative">
+          <button
+            onClick={() => setShowFontPicker(!showFontPicker)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800/90 text-slate-200 border border-slate-700 text-xs font-semibold hover:bg-slate-700 transition"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span className="truncate max-w-[110px]">
+              {VIETNAMESE_HANDWRITING_FONTS.find(f => f.family === fontFamily)?.name.split(' ')[0] || 'Font'}
+            </span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          </button>
 
-        {showFontPicker && (
-          <div className="absolute top-12 right-0 w-72 glass-panel rounded-2xl p-2 z-40 border border-slate-700 shadow-2xl animate-pop">
-            <div className="text-xs font-bold text-slate-400 px-3 py-1.5 border-b border-slate-800">
-              Font Viết Tay Tiếng Việt AI (GoodNotes Style)
+          {showFontPicker && (
+            <div className="absolute top-12 right-0 w-72 glass-panel rounded-2xl p-2 z-40 border border-slate-700 shadow-2xl animate-pop">
+              <div className="text-xs font-bold text-slate-400 px-3 py-1.5 border-b border-slate-800">
+                Font Viết Tay Tiếng Việt AI (GoodNotes Style)
+              </div>
+              <div className="mt-1 space-y-1">
+                {VIETNAMESE_HANDWRITING_FONTS.map((font) => (
+                  <button
+                    key={font.family}
+                    onClick={() => {
+                      onChangeFontFamily(font.family);
+                      setShowFontPicker(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 rounded-xl transition flex flex-col ${
+                      fontFamily === font.family ? 'bg-indigo-600/40 text-indigo-200 border border-indigo-500/50' : 'hover:bg-slate-800 text-slate-300'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">{font.name}</span>
+                    <span className="text-base truncate opacity-90 mt-0.5" style={{ fontFamily: font.family }}>
+                      {font.previewText}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="mt-1 space-y-1">
-              {VIETNAMESE_HANDWRITING_FONTS.map((font) => (
-                <button
-                  key={font.family}
-                  onClick={() => {
-                    onChangeFontFamily(font.family);
-                    setShowFontPicker(false);
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded-xl transition flex flex-col ${
-                    fontFamily === font.family ? 'bg-indigo-600/40 text-indigo-200 border border-indigo-500/50' : 'hover:bg-slate-800 text-slate-300'
-                  }`}
-                >
-                  <span className="text-xs font-bold">{font.name}</span>
-                  <span className="text-base truncate opacity-90 mt-0.5" style={{ fontFamily: font.family }}>
-                    {font.previewText}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
+
+        {/* Collapse Toolbar Toggle Button */}
+        <button
+          onClick={() => setIsCollapsed(true)}
+          className="p-2 rounded-xl bg-slate-800/90 text-slate-400 hover:text-white border border-slate-700 transition"
+          title="Thu gọn thanh công cụ để tăng diện tích ghi chú"
+        >
+          <EyeOff className="w-4 h-4" />
+        </button>
       </div>
     </div>
   );

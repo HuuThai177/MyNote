@@ -10,7 +10,10 @@ import {
   Download, 
   Smartphone, 
   ShieldCheck, 
-  Code2
+  Code2,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw
 } from 'lucide-react';
 import { Notebook } from '../types/notebook';
 
@@ -20,6 +23,10 @@ interface HeaderBarProps {
   totalPages: number;
   palmRejectionActive: boolean;
   onTogglePalmRejection: () => void;
+  zoomLevel: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onResetZoom: () => void;
   isRecording: boolean;
   recordingTime: number;
   onToggleRecording: () => void;
@@ -38,6 +45,10 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   totalPages,
   palmRejectionActive,
   onTogglePalmRejection,
+  zoomLevel,
+  onZoomIn,
+  onZoomOut,
+  onResetZoom,
   isRecording,
   recordingTime,
   onToggleRecording,
@@ -71,7 +82,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         <div className="h-6 w-px bg-slate-800 mx-1 hidden sm:block" />
 
         <div className="flex flex-col">
-          <h1 className="text-sm sm:text-base font-bold text-white truncate max-w-[180px] sm:max-w-[280px]">
+          <h1 className="text-sm sm:text-base font-bold text-white truncate max-w-[160px] sm:max-w-[240px]">
             {notebook ? notebook.title : 'Chưa chọn sổ tay'}
           </h1>
           <div className="flex items-center gap-2 text-xs text-slate-400">
@@ -82,7 +93,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         </div>
       </div>
 
-      {/* Center: Page Controls & Status Badges */}
+      {/* Center: Page Controls, Zoom Controls & Status Badges */}
       <div className="flex items-center gap-2.5">
         {/* Palm Rejection Status Indicator */}
         <button
@@ -92,21 +103,40 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 shadow-sm'
               : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
           }`}
-          title="Chống chạm lòng bàn tay (Chỉ nhận bút Xiaomi Smart Pen khi viết)"
+          title="Chống tì tay (CHỈ nhận bút Stylus khi bật ON, loại bỏ hoàn toàn chạm tay)"
         >
           <ShieldCheck className={`w-4 h-4 ${palmRejectionActive ? 'text-emerald-400 animate-pulse' : 'text-slate-400'}`} />
           <span className="hidden md:inline">
-            {palmRejectionActive ? 'Palm Rejection: ON' : 'Palm Rejection: OFF'}
+            {palmRejectionActive ? 'Stylus Only: ON' : 'Touch + Stylus'}
           </span>
         </button>
 
-        {/* Xiaomi Smart Pen Badge */}
-        <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/40">
-          <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
-          <span>Xiaomi Pen Ready</span>
+        {/* Canvas Page Zoom Controller */}
+        <div className="flex items-center bg-slate-900/90 rounded-2xl border border-slate-800 p-1 shadow-inner text-xs">
+          <button
+            onClick={onZoomOut}
+            className="p-1.5 rounded-xl text-slate-300 hover:bg-slate-800 transition"
+            title="Thu nhỏ trang giấy"
+          >
+            <ZoomOut className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onResetZoom}
+            className="px-2 font-bold text-indigo-400 hover:text-indigo-300 transition"
+            title="Đặt lại tỉ lệ 100%"
+          >
+            {Math.round(zoomLevel * 100)}%
+          </button>
+          <button
+            onClick={onZoomIn}
+            className="p-1.5 rounded-xl text-slate-300 hover:bg-slate-800 transition"
+            title="Phóng to trang giấy"
+          >
+            <ZoomIn className="w-3.5 h-3.5" />
+          </button>
         </div>
 
-        {/* GoodNotes Style Page Switcher Pill */}
+        {/* Page Switcher Pill */}
         <div className="flex items-center bg-slate-900/90 rounded-2xl border border-slate-800 p-1 shadow-inner">
           <button
             onClick={onPrevPage}
@@ -116,7 +146,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <span className="px-2.5 text-xs font-extrabold text-slate-200">
+          <span className="px-2 text-xs font-extrabold text-slate-200">
             {currentPageIndex + 1}
           </span>
           <button
@@ -137,7 +167,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         </div>
       </div>
 
-      {/* Right: Actions (Audio Sync, PDF Import, Export, Native ML Kit Modal) */}
+      {/* Right: Actions */}
       <div className="flex items-center gap-2">
         {/* Audio Recording Sync */}
         <button
@@ -168,7 +198,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         <button
           onClick={onExportPage}
           className="p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
-          title="Xuất trang thành hình ảnh PNG"
+          title="Xuất trang (PDF / Markdown / TXT)"
         >
           <Download className="w-4 h-4 text-emerald-400" />
         </button>

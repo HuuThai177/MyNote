@@ -23,6 +23,7 @@ export const App: React.FC = () => {
   const [fontFamily, setFontFamily] = useState<string>("'Caveat', cursive");
   const [smartShapeEnabled, setSmartShapeEnabled] = useState<boolean>(true);
   const [palmRejectionActive, setPalmRejectionActive] = useState<boolean>(true);
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
 
   // Audio Recording Sync
   const [isRecordingAudio, setIsRecordingAudio] = useState<boolean>(false);
@@ -64,6 +65,11 @@ export const App: React.FC = () => {
 
   const activeNotebook = notebooks.find(n => n.id === activeNotebookId) || null;
   const currentPage = activeNotebook?.pages[currentPageIndex] || null;
+
+  // Zoom Handlers
+  const handleZoomIn = () => setZoomLevel(prev => Math.min(3.0, parseFloat((prev + 0.15).toFixed(2))));
+  const handleZoomOut = () => setZoomLevel(prev => Math.max(0.5, parseFloat((prev - 0.15).toFixed(2))));
+  const handleResetZoom = () => setZoomLevel(1.0);
 
   // Toggle Audio Recording
   const handleToggleRecording = async () => {
@@ -194,6 +200,10 @@ export const App: React.FC = () => {
         totalPages={activeNotebook?.pages.length || 1}
         palmRejectionActive={palmRejectionActive}
         onTogglePalmRejection={() => setPalmRejectionActive(!palmRejectionActive)}
+        zoomLevel={zoomLevel}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onResetZoom={handleResetZoom}
         isRecording={isRecordingAudio}
         recordingTime={recordingTime}
         onToggleRecording={handleToggleRecording}
@@ -232,6 +242,7 @@ export const App: React.FC = () => {
             fontFamily={fontFamily}
             smartShapeEnabled={smartShapeEnabled}
             palmRejectionActive={palmRejectionActive}
+            zoomLevel={zoomLevel}
             onPageUpdate={handlePageUpdate}
             audioRecordingTime={recordingTime}
             isRecordingAudio={isRecordingAudio}

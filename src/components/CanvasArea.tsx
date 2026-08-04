@@ -31,6 +31,7 @@ interface CanvasAreaProps {
   fontFamily: string;
   smartShapeEnabled: boolean;
   palmRejectionActive: boolean;
+  zoomLevel: number;
   onPageUpdate: (updatedPage: NotebookPage) => void;
   audioRecordingTime: number;
   isRecordingAudio: boolean;
@@ -44,6 +45,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   fontFamily,
   smartShapeEnabled,
   palmRejectionActive,
+  zoomLevel,
   onPageUpdate,
   audioRecordingTime,
   isRecordingAudio
@@ -56,6 +58,10 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [lassoPolygon, setLassoPolygon] = useState<{ x: number; y: number }[]>([]);
   const [selectedStrokes, setSelectedStrokes] = useState<Stroke[]>([]);
   const [lassoMenuPos, setLassoMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Lasso Selection Dragging & Scale State
+  const [isDraggingLasso, setIsDraggingLasso] = useState(false);
+  const [lassoDragLastPos, setLassoDragLastPos] = useState<{ x: number; y: number } | null>(null);
 
   // Active Selected Text Element State
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
@@ -86,15 +92,15 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       if (!canvasRef.current || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
       const canvas = canvasRef.current;
-      canvas.width = rect.width;
-      canvas.height = rect.height;
+      canvas.width = rect.width / zoomLevel;
+      canvas.height = rect.height / zoomLevel;
       renderCanvas();
     };
 
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [page]);
+  }, [page, zoomLevel]);
 
   // Main Render Canvas Function
   const renderCanvas = () => {
@@ -115,7 +121,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       drawSingleStroke(ctx, currentStroke, color, size, currentTool);
     }
 
-    // 3. Render Lasso Selection Polygon
+    // 3. Render Lasso Selection Polygon & Bounding Box
     if (lassoPolygon.length > 1) {
       ctx.save();
       ctx.beginPath();
@@ -200,23 +206,28 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       setSelectedTextId(null);
     }
 
-    // PALM REJECTION FIX: Filter out large contact surface areas (palms > 25px)
-    // Allows pen/stylus (pointerType === 'pen') and fine touch writing seamlessly!
-    if (palmRejectionActive && e.pointerType === 'touch') {
-      const contactWidth = e.width || 0;
-      const contactHeight = e.height || 0;
-      if (contactWidth > 25 || contactHeight > 25) {
-        return; // Filter out palm touch
-      }
+    // STRICT PALM REJECTION: When ON, strictly allow ONLY Stylus / Pen pointers (e.pointerType === 'pen')
+    // Completely rejects finger touch (pointerType === 'touch') or mouse when Palm Rejection is active
+    if (palmRejectionActive && e.pointerType !== 'pen') {
+      return;
     }
 
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = (e.clientX - rect.left) / zoomLevel;
+    const y = (e.clientY - rect.top) / zoomLevel;
     const pressure = e.pressure > 0 ? e.pressure : 0.6;
     const pt: Point = { x, y, pressure, time: Date.now() };
+
+    // Check if clicking inside active Lasso Selection area to DRAG MOVE objects
+    if (selectedStrokes.length > 0 && lassoPolygon.length > 2) {
+      if (isPointInPolygon({ x, y }, lassoPolygon)) {
+        setIsDraggingLasso(true);
+        setLassoDragLastPos({ x, y });
+        return;
+      }
+    }
 
     setIsDrawing(true);
 
@@ -235,7 +246,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         if (shapeHoldTimer.current) clearTimeout(shapeHoldTimer.current);
         shapeHoldTimer.current = setTimeout(() => {
           triggerShapeSmooth();
-        }, 500); // 0.5 seconds hold for Perfect Shapes
+        }, 500); // 0.5s Hold
       }
     }
   };
@@ -245,8 +256,41 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = (e.clientX - rect.left) / zoomLevel;
+    const y = (e.clientY - rect.top) / zoomLevel;
+
+    // Handle Dragging / Moving Lasso Selected Objects
+    if (isDraggingLasso && lassoDragLastPos && selectedStrokes.length > 0) {
+      const dx = x - lassoDragLastPos.x;
+      const dy = y - lassoDragLastPos.y;
+      setLassoDragLastPos({ x, y });
+
+      const selectedIds = selectedStrokes.map(s => s.id);
+
+      // Shift selected strokes points
+      const updatedStrokes = page.strokes.map(stroke => {
+        if (selectedIds.includes(stroke.id)) {
+          return {
+            ...stroke,
+            points: stroke.points.map(p => ({ ...p, x: p.x + dx, y: p.y + dy }))
+          };
+        }
+        return stroke;
+      });
+
+      // Shift lasso polygon
+      const updatedPoly = lassoPolygon.map(p => ({ x: p.x + dx, y: p.y + dy }));
+      const updatedSelected = updatedStrokes.filter(s => selectedIds.includes(s.id));
+
+      setLassoPolygon(updatedPoly);
+      setSelectedStrokes(updatedSelected);
+      onPageUpdate({ ...page, strokes: updatedStrokes });
+
+      if (lassoMenuPos) {
+        setLassoMenuPos({ x: (lassoMenuPos.x + dx * zoomLevel), y: (lassoMenuPos.y + dy * zoomLevel) });
+      }
+      return;
+    }
 
     // Dragging Text Box
     if (isDraggingText && selectedTextId) {
@@ -335,7 +379,6 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     const bboxDiag = Math.hypot(scratchBbox.width, scratchBbox.height);
     const densityRatio = totalLen / Math.max(10, bboxDiag);
 
-    // Requires high directional reversals (>= 8) and high trajectory density (>= 3.2)
     return dirFlips >= 8 && densityRatio >= 3.2 && totalLen > 150;
   };
 
@@ -357,8 +400,6 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
     const area = circleBbox.width * circleBbox.height;
 
-    // Small letters like 'o', 'a', 'e', 'g', '0' have area < 4000px² and will NOT trigger lasso select!
-    // Requires closed loop (dist < 35px), large enclosed area (> 6500px²), and min dimensions (> 60px)
     return (
       distStartEnd < 35 && 
       totalLen > 180 && 
@@ -377,6 +418,11 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   // Pointer Up
   const handlePointerUp = () => {
+    if (isDraggingLasso) {
+      setIsDraggingLasso(false);
+      setLassoDragLastPos(null);
+    }
+
     if (isDraggingText) setIsDraggingText(false);
     if (isResizingText) setIsResizingText(false);
 
@@ -391,7 +437,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
       if (selected.length > 0) {
         const bbox = VietnameseInkRecognizer.getBoundingBox(selected);
-        setLassoMenuPos({ x: bbox.x + bbox.width / 2, y: bbox.y });
+        setLassoMenuPos({ x: (bbox.x + bbox.width / 2) * zoomLevel, y: bbox.y * zoomLevel });
       } else {
         setLassoPolygon([]);
       }
@@ -416,7 +462,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           setSelectedStrokes(selected);
           setLassoPolygon(circlePoly);
           const bbox = VietnameseInkRecognizer.getBoundingBox(selected);
-          setLassoMenuPos({ x: bbox.x + bbox.width / 2, y: bbox.y });
+          setLassoMenuPos({ x: (bbox.x + bbox.width / 2) * zoomLevel, y: bbox.y * zoomLevel });
           setCurrentStroke([]);
           return;
         }
@@ -441,6 +487,45 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   };
 
+  // Scale / Resize Selected Objects in Lasso Area
+  const handleScaleSelectedStrokes = (scaleFactor: number) => {
+    if (selectedStrokes.length === 0) return;
+
+    const bbox = VietnameseInkRecognizer.getBoundingBox(selectedStrokes);
+    const centerX = bbox.x + bbox.width / 2;
+    const centerY = bbox.y + bbox.height / 2;
+    const selectedIds = selectedStrokes.map(s => s.id);
+
+    const updatedStrokes = page.strokes.map(stroke => {
+      if (selectedIds.includes(stroke.id)) {
+        return {
+          ...stroke,
+          size: Math.max(1, stroke.size * scaleFactor),
+          points: stroke.points.map(p => ({
+            ...p,
+            x: centerX + (p.x - centerX) * scaleFactor,
+            y: centerY + (p.y - centerY) * scaleFactor
+          }))
+        };
+      }
+      return stroke;
+    });
+
+    const updatedPoly = lassoPolygon.map(p => ({
+      x: centerX + (p.x - centerX) * scaleFactor,
+      y: centerY + (p.y - centerY) * scaleFactor
+    }));
+
+    const updatedSelected = updatedStrokes.filter(s => selectedIds.includes(s.id));
+
+    setLassoPolygon(updatedPoly);
+    setSelectedStrokes(updatedSelected);
+    onPageUpdate({ ...page, strokes: updatedStrokes });
+
+    const newBbox = VietnameseInkRecognizer.getBoundingBox(updatedSelected);
+    setLassoMenuPos({ x: (newBbox.x + newBbox.width / 2) * zoomLevel, y: newBbox.y * zoomLevel });
+  };
+
   // Eraser collision
   const eraseAtPoint = (x: number, y: number) => {
     const eraserRadius = size * 2.5;
@@ -453,19 +538,22 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   };
 
+  // Point in polygon test
+  const isPointInPolygon = (pt: { x: number; y: number }, poly: { x: number; y: number }[]) => {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y;
+      const xj = poly[j].x, yj = poly[j].y;
+      const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+        (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  };
+
   // Lasso collision
   const isStrokeInPolygon = (stroke: Stroke, poly: { x: number; y: number }[]) => {
-    return stroke.points.some(pt => {
-      let inside = false;
-      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-        const xi = poly[i].x, yi = poly[i].y;
-        const xj = poly[j].x, yj = poly[j].y;
-        const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
-          (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi);
-        if (intersect) inside = !inside;
-      }
-      return inside;
-    });
+    return stroke.points.some(pt => isPointInPolygon(pt, poly));
   };
 
   // Smart Shape Smooth
@@ -579,138 +667,144 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       ref={containerRef}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      className={`relative w-full h-full overflow-hidden select-none touch-none ${getTemplateClass()}`}
+      className={`relative w-full h-full overflow-auto select-none touch-none ${getTemplateClass()}`}
     >
-      {/* PDF Background */}
-      {page.pdfDataUrl && (
-        <img
-          src={page.pdfDataUrl}
-          alt="PDF Page"
-          className="absolute inset-0 w-full h-full object-contain pointer-events-none opacity-90 z-0"
+      {/* Zoom Transform Wrapper */}
+      <div 
+        className="relative w-full h-full min-w-full min-h-full origin-top-left transition-transform duration-75"
+        style={{ transform: `scale(${zoomLevel})` }}
+      >
+        {/* PDF Background */}
+        {page.pdfDataUrl && (
+          <img
+            src={page.pdfDataUrl}
+            alt="PDF Page"
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none opacity-90 z-0"
+          />
+        )}
+
+        {/* Interactive Graphic Canvas Layer */}
+        <canvas
+          ref={canvasRef}
+          onPointerDown={handlePointerDown}
+          className="absolute inset-0 w-full h-full z-10 cursor-crosshair touch-none"
         />
-      )}
 
-      {/* Interactive Graphic Canvas Layer */}
-      <canvas
-        ref={canvasRef}
-        onPointerDown={handlePointerDown}
-        className="absolute inset-0 w-full h-full z-10 cursor-crosshair touch-none"
-      />
+        {/* Render Text Elements */}
+        {page.textElements.map((txt) => {
+          const isSelected = selectedTextId === txt.id;
 
-      {/* Render Text Elements */}
-      {page.textElements.map((txt) => {
-        const isSelected = selectedTextId === txt.id;
+          return (
+            <div
+              key={txt.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedTextId(txt.id);
+              }}
+              className={`absolute z-20 transition-all rounded-2xl ${
+                isSelected 
+                  ? 'ring-2 ring-indigo-500 shadow-2xl bg-white/95 backdrop-blur-md p-3 border border-indigo-300' 
+                  : 'hover:ring-1 hover:ring-slate-400/50 p-2'
+              }`}
+              style={{
+                left: `${txt.x}px`,
+                top: `${txt.y}px`,
+                width: `${txt.width}px`,
+                height: `${txt.height}px`
+              }}
+            >
+              {/* Active Floating Text Toolbar */}
+              {isSelected && (
+                <div className="absolute -top-12 left-0 right-0 glass-toolbar px-3 py-1.5 rounded-xl flex items-center justify-between gap-2 z-30 shadow-xl border border-slate-700 animate-pop">
+                  {/* Drag Handle */}
+                  <div
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setIsDraggingText(true);
+                      setDragOffset({ x: e.clientX - txt.x, y: e.clientY - txt.y });
+                    }}
+                    className="flex items-center gap-1 cursor-grab active:cursor-grabbing text-indigo-400 hover:text-indigo-300 font-bold text-xs"
+                    title="Giữ và kéo để di chuyển khung chữ"
+                  >
+                    <Grip className="w-4 h-4" />
+                    <span>Kéo di chuyển</span>
+                  </div>
 
-        return (
-          <div
-            key={txt.id}
-            onClick={(e) => {
-              e.stopPropagation();
-              setSelectedTextId(txt.id);
-            }}
-            className={`absolute z-20 transition-all rounded-2xl ${
-              isSelected 
-                ? 'ring-2 ring-indigo-500 shadow-2xl bg-white/95 backdrop-blur-md p-3 border border-indigo-300' 
-                : 'hover:ring-1 hover:ring-slate-400/50 p-2'
-            }`}
-            style={{
-              left: `${txt.x}px`,
-              top: `${txt.y}px`,
-              width: `${txt.width}px`,
-              height: `${txt.height}px`
-            }}
-          >
-            {/* Active Floating Text Toolbar */}
-            {isSelected && (
-              <div className="absolute -top-12 left-0 right-0 glass-toolbar px-3 py-1.5 rounded-xl flex items-center justify-between gap-2 z-30 shadow-xl border border-slate-700 animate-pop">
-                {/* Drag Handle */}
+                  {/* Font Size & Actions */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        const updated = page.textElements.map(t => t.id === txt.id ? { ...t, fontSize: Math.max(14, t.fontSize - 2) } : t);
+                        onPageUpdate({ ...page, textElements: updated });
+                      }}
+                      className="p-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      title="Thu nhỏ font"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-xs font-bold text-slate-200 px-1">{txt.fontSize}px</span>
+                    <button
+                      onClick={() => {
+                        const updated = page.textElements.map(t => t.id === txt.id ? { ...t, fontSize: Math.min(72, t.fontSize + 2) } : t);
+                        onPageUpdate({ ...page, textElements: updated });
+                      }}
+                      className="p-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      title="Phóng to font"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+
+                    <div className="h-4 w-px bg-slate-700 mx-1" />
+
+                    {/* Delete Text Element */}
+                    <button
+                      onClick={() => {
+                        const updated = page.textElements.filter(t => t.id !== txt.id);
+                        onPageUpdate({ ...page, textElements: updated });
+                        setSelectedTextId(null);
+                      }}
+                      className="p-1 rounded bg-rose-600/80 text-white hover:bg-rose-600"
+                      title="Xóa khung chữ này"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Editable Text Area */}
+              <textarea
+                value={txt.text}
+                onChange={(e) => {
+                  const updated = page.textElements.map(t => t.id === txt.id ? { ...t, text: e.target.value } : t);
+                  onPageUpdate({ ...page, textElements: updated });
+                }}
+                className="bg-transparent border-none outline-none resize-none w-full h-full leading-snug font-medium text-[#1F2937]"
+                style={{
+                  fontFamily: txt.fontFamily,
+                  color: txt.color || '#1F2937',
+                  fontSize: `${txt.fontSize}px`
+                }}
+              />
+
+              {/* Bottom-Right Corner Resize Handle */}
+              {isSelected && (
                 <div
                   onPointerDown={(e) => {
                     e.stopPropagation();
-                    setIsDraggingText(true);
-                    setDragOffset({ x: e.clientX - txt.x, y: e.clientY - txt.y });
+                    setIsResizingText(true);
+                    setResizeStart({ x: e.clientX, y: e.clientY, w: txt.width, h: txt.height, font: txt.fontSize });
                   }}
-                  className="flex items-center gap-1 cursor-grab active:cursor-grabbing text-indigo-400 hover:text-indigo-300 font-bold text-xs"
-                  title="Giữ và kéo để di chuyển khung chữ"
+                  className="absolute -bottom-2 -right-2 w-6 h-6 rounded-full bg-indigo-600 text-white border-2 border-white flex items-center justify-center cursor-nwse-resize shadow-lg z-30 transform hover:scale-125 transition"
+                  title="Kéo góc này để phóng to / thu nhỏ khung chữ"
                 >
-                  <Grip className="w-4 h-4" />
-                  <span>Kéo di chuyển</span>
+                  <Maximize2 className="w-3 h-3" />
                 </div>
-
-                {/* Font Size & Actions */}
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => {
-                      const updated = page.textElements.map(t => t.id === txt.id ? { ...t, fontSize: Math.max(14, t.fontSize - 2) } : t);
-                      onPageUpdate({ ...page, textElements: updated });
-                    }}
-                    className="p-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
-                    title="Thu nhỏ font"
-                  >
-                    <Minus className="w-3.5 h-3.5" />
-                  </button>
-                  <span className="text-xs font-bold text-slate-200 px-1">{txt.fontSize}px</span>
-                  <button
-                    onClick={() => {
-                      const updated = page.textElements.map(t => t.id === txt.id ? { ...t, fontSize: Math.min(72, t.fontSize + 2) } : t);
-                      onPageUpdate({ ...page, textElements: updated });
-                    }}
-                    className="p-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
-                    title="Phóng to font"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
-
-                  <div className="h-4 w-px bg-slate-700 mx-1" />
-
-                  {/* Delete Text Element */}
-                  <button
-                    onClick={() => {
-                      const updated = page.textElements.filter(t => t.id !== txt.id);
-                      onPageUpdate({ ...page, textElements: updated });
-                      setSelectedTextId(null);
-                    }}
-                    className="p-1 rounded bg-rose-600/80 text-white hover:bg-rose-600"
-                    title="Xóa khung chữ này"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Editable Text Area */}
-            <textarea
-              value={txt.text}
-              onChange={(e) => {
-                const updated = page.textElements.map(t => t.id === txt.id ? { ...t, text: e.target.value } : t);
-                onPageUpdate({ ...page, textElements: updated });
-              }}
-              className="bg-transparent border-none outline-none resize-none w-full h-full leading-snug font-medium text-[#1F2937]"
-              style={{
-                fontFamily: txt.fontFamily,
-                color: txt.color || '#1F2937',
-                fontSize: `${txt.fontSize}px`
-              }}
-            />
-
-            {/* Bottom-Right Corner Resize Handle */}
-            {isSelected && (
-              <div
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  setIsResizingText(true);
-                  setResizeStart({ x: e.clientX, y: e.clientY, w: txt.width, h: txt.height, font: txt.fontSize });
-                }}
-                className="absolute -bottom-2 -right-2 w-6 h-6 rounded-full bg-indigo-600 text-white border-2 border-white flex items-center justify-center cursor-nwse-resize shadow-lg z-30 transform hover:scale-125 transition"
-                title="Kéo góc này để phóng to / thu nhỏ khung chữ"
-              >
-                <Maximize2 className="w-3 h-3" />
-              </div>
-            )}
-          </div>
-        );
-      })}
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       {/* Lasso Context Action Menu */}
       {lassoMenuPos && (
@@ -720,6 +814,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           onConvertToText={handleConvertToTextModal}
           onAiSummarize={handleAiSummarize}
           onDeleteStrokes={handleDeleteSelectedStrokes}
+          onScaleSelected={handleScaleSelectedStrokes}
           onClose={() => {
             setLassoPolygon([]);
             setSelectedStrokes([]);
