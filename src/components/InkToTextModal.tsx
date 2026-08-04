@@ -95,15 +95,24 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
   ]));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
-      <form onSubmit={handleSubmit} className="glass-panel w-full max-w-lg rounded-2xl p-6 border border-slate-700 shadow-2xl animate-pop space-y-4 max-h-[92vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm overflow-y-auto">
+      {/* Light-themed Dialog Card: White background #FFFFFF, dark text #1F2937, border #E5E7EB, borderRadius 12 */}
+      <form 
+        onSubmit={handleSubmit} 
+        className="w-full max-w-lg bg-white rounded-xl p-6 border border-[#E5E7EB] shadow-2xl animate-pop space-y-4 max-h-[92vh] overflow-y-auto text-[#1F2937]"
+        style={{ borderRadius: '12px', backgroundColor: '#FFFFFF' }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2 text-indigo-400 font-bold text-base">
-            <Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />
+        <div className="flex items-center justify-between border-b border-[#E5E7EB] pb-3">
+          <div className="flex items-center gap-2 text-indigo-600 font-bold text-base">
+            <Sparkles className="w-5 h-5 text-amber-500 animate-pulse" />
             <span>Nhận Diện & Chuyển Đổi Chữ Viết Tay AI</span>
           </div>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white">
+          <button 
+            type="button" 
+            onClick={onClose} 
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -111,7 +120,7 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
         {/* Text Input & Voice Input Button */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <label className="text-xs font-semibold text-slate-300">
+            <label className="text-xs font-bold text-[#1F2937]">
               Nhập / Sửa chữ Tiếng Việt chính xác 100%:
             </label>
             <button
@@ -119,8 +128,8 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
               onClick={handleVoiceInput}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition border ${
                 isListening
-                  ? 'bg-rose-600 text-white border-rose-400 animate-pulse shadow-md shadow-rose-600/40'
-                  : 'bg-indigo-600/30 text-indigo-300 border-indigo-500/40 hover:bg-indigo-600/50'
+                  ? 'bg-rose-600 text-white border-rose-400 animate-pulse shadow-md shadow-rose-200'
+                  : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
               }`}
             >
               <Mic className="w-3.5 h-3.5" />
@@ -136,13 +145,13 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
               placeholder="Nhập chính xác chữ bạn viết..."
               autoFocus
               required
-              className="w-full px-4 py-3 rounded-xl bg-slate-900 border-2 border-indigo-500 text-white font-bold text-xl focus:outline-none focus:ring-4 focus:ring-indigo-500/30 shadow-inner"
+              className="w-full px-4 py-3 rounded-xl bg-[#FAFAFA] border border-[#E5E7EB] text-[#1F2937] font-bold text-xl focus:outline-none focus:border-indigo-600 focus:bg-white focus:ring-4 focus:ring-indigo-100 shadow-sm transition"
             />
             {text && (
               <button
                 type="button"
                 onClick={() => setText('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 p-1"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -151,13 +160,13 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
         </div>
 
         {/* Live Font Preview Box */}
-        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+        <div className="p-4 rounded-xl bg-[#FAFAFA] border border-[#E5E7EB]">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-semibold text-slate-400">Xem trước nét chữ viết tay Tiếng Việt:</span>
-            <span className="text-[11px] text-indigo-400 font-medium">{selectedFont.split(',')[0]}</span>
+            <span className="text-xs font-semibold text-gray-500">Xem trước nét chữ viết tay Tiếng Việt:</span>
+            <span className="text-[11px] text-indigo-600 font-bold">{selectedFont.split(',')[0]}</span>
           </div>
           <div
-            className="text-3xl text-indigo-300 truncate py-1 font-normal"
+            className="text-3xl text-indigo-700 truncate py-1 font-normal"
             style={{ fontFamily: selectedFont }}
           >
             {text || 'Nét chữ mẫu'}
@@ -167,11 +176,11 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
         {/* Custom Candidate Chips & Add Word Trigger */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-semibold text-slate-300">Bảng gợi ý từ vựng 1-chạm:</span>
+            <span className="text-xs font-bold text-[#1F2937]">Bảng gợi ý từ vựng 1-chạm:</span>
             <button
               type="button"
               onClick={() => setShowAddWord(!showAddWord)}
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1"
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Thêm từ mới</span>
@@ -179,18 +188,18 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
           </div>
 
           {showAddWord && (
-            <div className="flex items-center gap-2 mb-2 bg-slate-900 p-2 rounded-xl border border-indigo-500/40">
+            <div className="flex items-center gap-2 mb-2 bg-[#FAFAFA] p-2 rounded-xl border border-[#E5E7EB]">
               <input
                 type="text"
                 value={customWordInput}
                 onChange={(e) => setCustomWordInput(e.target.value)}
                 placeholder="Nhập tên riêng/từ mới..."
-                className="flex-1 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-white focus:outline-none"
+                className="flex-1 px-3 py-1.5 rounded-lg bg-white border border-[#E5E7EB] text-xs text-[#1F2937] focus:outline-none focus:border-indigo-600"
               />
               <button
                 type="button"
                 onClick={handleAddCustomWord}
-                className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold text-xs"
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm"
               >
                 Thêm
               </button>
@@ -205,8 +214,8 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
                 onClick={() => setText(sugg)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center gap-1 ${
                   text === sugg
-                    ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-600/40'
-                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200'
+                    : 'bg-[#FAFAFA] text-[#1F2937] border-[#E5E7EB] hover:bg-gray-100 hover:border-gray-300'
                 }`}
               >
                 {text === sugg && <Check className="w-3.5 h-3.5 text-amber-300" />}
@@ -218,11 +227,11 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
 
         {/* Font Family Selector */}
         <div>
-          <label className="text-xs font-semibold text-slate-400 block mb-1.5">Kiểu Font chữ nghệ thuật Tiếng Việt:</label>
+          <label className="text-xs font-bold text-gray-700 block mb-1.5">Kiểu Font chữ nghệ thuật Tiếng Việt:</label>
           <select
             value={selectedFont}
             onChange={(e) => setSelectedFont(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 text-sm font-semibold focus:outline-none focus:border-indigo-500"
+            className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAFAFA] border border-[#E5E7EB] text-[#1F2937] text-sm font-semibold focus:outline-none focus:border-indigo-600 focus:bg-white transition"
           >
             {VIETNAMESE_HANDWRITING_FONTS.map(f => (
               <option key={f.family} value={f.family}>{f.name}</option>
@@ -231,20 +240,20 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-800">
+        <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#E5E7EB]">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 rounded-xl text-slate-400 hover:text-white text-xs font-bold"
+            className="px-4 py-2.5 rounded-xl text-gray-600 hover:text-gray-900 hover:bg-gray-100 text-xs font-bold transition"
           >
             Hủy
           </button>
 
           <button
             type="submit"
-            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 transition"
+            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-indigo-200 transition"
           >
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <CheckCircle2 className="w-4 h-4 text-emerald-300" />
             <span>Chấp Nhận & Đổi Font</span>
           </button>
         </div>

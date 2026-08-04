@@ -24,22 +24,35 @@ export class ShapeSmoother {
       totalPathLength += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
     }
 
-    // Straight Line Check: start and end are far apart and path length is close to straight distance
-    if (distStartEnd > 50 && totalPathLength / distStartEnd < 1.15) {
+    // 1. Straight Line Check: start and end are far apart and path length is close to straight distance
+    if (distStartEnd > 40 && totalPathLength / distStartEnd < 1.2) {
+      let finalEndX = end.x;
+      let finalEndY = end.y;
+
+      // Smart ruler snapping: snap to horizontal or vertical if angle is close (< 8 degrees)
+      const dx = Math.abs(end.x - start.x);
+      const dy = Math.abs(end.y - start.y);
+      if (dy < dx * 0.14) {
+        // Snap to horizontal
+        finalEndY = start.y;
+      } else if (dx < dy * 0.14) {
+        // Snap to vertical
+        finalEndX = start.x;
+      }
+
       return {
         type: 'line',
         smoothedPoints: [
           start,
-          { x: end.x, y: end.y, pressure: (start.pressure + end.pressure) / 2, time: end.time }
+          { x: finalEndX, y: finalEndY, pressure: (start.pressure + end.pressure) / 2, time: end.time }
         ]
       };
     }
 
-    // Closed Loop Check: start and end are close together
-    const isClosed = distStartEnd < Math.max(30, totalPathLength * 0.15);
+    // 2. Closed Loop Check: start and end are close together
+    const isClosed = distStartEnd < Math.max(35, totalPathLength * 0.2);
 
     if (isClosed) {
-      // Calculate Bounding Box and Center
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       pts.forEach(p => {
         if (p.x < minX) minX = p.x;
@@ -52,8 +65,8 @@ export class ShapeSmoother {
       const height = maxY - minY;
       const aspectRatio = width / Math.max(1, height);
 
-      // Check Circle / Ellipse vs Rectangle
-      if (aspectRatio > 0.7 && aspectRatio < 1.4) {
+      // Check Circle vs Rectangle
+      if (aspectRatio > 0.65 && aspectRatio < 1.5) {
         // Perfect Circle
         const centerX = (minX + maxX) / 2;
         const centerY = (minY + maxY) / 2;

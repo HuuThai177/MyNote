@@ -7,6 +7,7 @@ import { Toolbar } from './components/Toolbar';
 import { Sidebar } from './components/Sidebar';
 import { CanvasArea } from './components/CanvasArea';
 import { NativeGuideModal } from './components/NativeGuideModal';
+import { ExportModal } from './components/ExportModal';
 
 const audioEngine = new AudioSyncEngine();
 
@@ -30,6 +31,7 @@ export const App: React.FC = () => {
   // Modals & Sidebar
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [nativeGuideOpen, setNativeGuideOpen] = useState<boolean>(false);
+  const [exportModalOpen, setExportModalOpen] = useState<boolean>(false);
 
   // Load Notebooks on App Init
   useEffect(() => {
@@ -178,9 +180,9 @@ export const App: React.FC = () => {
     input.click();
   };
 
-  // Export Page as PNG Image
+  // Export Page Trigger
   const handleExportPage = () => {
-    alert('📸 Trang sổ tay đã được xuất thành hình ảnh PNG chất lượng cao!');
+    setExportModalOpen(true);
   };
 
   return (
@@ -264,6 +266,15 @@ export const App: React.FC = () => {
       <NativeGuideModal
         isOpen={nativeGuideOpen}
         onClose={() => setNativeGuideOpen(false)}
+      />
+
+      {/* Flexible Export Options Modal */}
+      <ExportModal
+        isOpen={exportModalOpen}
+        notebook={activeNotebook}
+        page={currentPage}
+        currentPageIndex={currentPageIndex}
+        onClose={() => setExportModalOpen(false)}
       />
     </div>
   );

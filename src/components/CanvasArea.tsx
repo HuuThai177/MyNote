@@ -200,9 +200,14 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       setSelectedTextId(null);
     }
 
-    // PALM REJECTION: Ignore finger touch when stylus is writing
-    if (palmRejectionActive && e.pointerType === 'touch' && currentTool === 'pen') {
-      return;
+    // PALM REJECTION FIX: Filter out large contact surface areas (palms > 25px)
+    // Allows pen/stylus (pointerType === 'pen') and fine touch writing seamlessly!
+    if (palmRejectionActive && e.pointerType === 'touch') {
+      const contactWidth = e.width || 0;
+      const contactHeight = e.height || 0;
+      if (contactWidth > 25 || contactHeight > 25) {
+        return; // Filter out palm touch
+      }
     }
 
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -230,7 +235,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         if (shapeHoldTimer.current) clearTimeout(shapeHoldTimer.current);
         shapeHoldTimer.current = setTimeout(() => {
           triggerShapeSmooth();
-        }, 450);
+        }, 500); // 0.5 seconds hold for Perfect Shapes
       }
     }
   };
@@ -299,9 +304,75 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         clearTimeout(shapeHoldTimer.current);
         shapeHoldTimer.current = setTimeout(() => {
           triggerShapeSmooth();
-        }, 450);
+        }, 500); // 0.5s Hold
       }
     }
+  };
+
+  // Detect Stylus Gesture: Scratch to Erase (Dense back-and-forth scribble)
+  const isScratchGesture = (pts: Point[]): boolean => {
+    if (pts.length < 16) return false;
+
+    let dirFlips = 0;
+    let totalLen = 0;
+    let prevDx = 0;
+
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i].x - pts[i - 1].x;
+      const dy = pts[i].y - pts[i - 1].y;
+      totalLen += Math.hypot(dx, dy);
+
+      if ((dx > 3 && prevDx < -3) || (dx < -3 && prevDx > 3)) {
+        dirFlips++;
+      }
+      if (Math.abs(dx) > 3) prevDx = dx;
+    }
+
+    const scratchBbox = VietnameseInkRecognizer.getBoundingBox([{
+      id: 'temp', tool: 'pen', color: '#000', size: 1, opacity: 1, points: pts
+    }]);
+
+    const bboxDiag = Math.hypot(scratchBbox.width, scratchBbox.height);
+    const densityRatio = totalLen / Math.max(10, bboxDiag);
+
+    // Requires high directional reversals (>= 8) and high trajectory density (>= 3.2)
+    return dirFlips >= 8 && densityRatio >= 3.2 && totalLen > 150;
+  };
+
+  // Detect Stylus Gesture: Circle to Select (Large intentional enclosed loop)
+  const isCircleGesture = (pts: Point[]): boolean => {
+    if (pts.length < 16) return false;
+    const start = pts[0];
+    const end = pts[pts.length - 1];
+    const distStartEnd = Math.hypot(end.x - start.x, end.y - start.y);
+
+    let totalLen = 0;
+    for (let i = 1; i < pts.length; i++) {
+      totalLen += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    }
+
+    const circleBbox = VietnameseInkRecognizer.getBoundingBox([{
+      id: 'temp', tool: 'pen', color: '#000', size: 1, opacity: 1, points: pts
+    }]);
+
+    const area = circleBbox.width * circleBbox.height;
+
+    // Small letters like 'o', 'a', 'e', 'g', '0' have area < 4000px² and will NOT trigger lasso select!
+    // Requires closed loop (dist < 35px), large enclosed area (> 6500px²), and min dimensions (> 60px)
+    return (
+      distStartEnd < 35 && 
+      totalLen > 180 && 
+      area > 6500 && 
+      circleBbox.width > 60 && 
+      circleBbox.height > 60
+    );
+  };
+
+  // Check direct point proximity for Scratch Erase
+  const isStrokeIntersectedByScratch = (targetStroke: Stroke, scratchPoints: Point[]): boolean => {
+    return targetStroke.points.some(tp =>
+      scratchPoints.some(sp => Math.hypot(sp.x - tp.x, sp.y - tp.y) < 20)
+    );
   };
 
   // Pointer Up
@@ -325,7 +396,33 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         setLassoPolygon([]);
       }
     } else if (currentStroke.length > 0) {
-      // Normal Pen Drawing: ALWAYS save permanent stroke on canvas!
+      // 1. Check Stylus Gesture: Scratch to Erase
+      if (currentTool === 'pen' && isScratchGesture(currentStroke)) {
+        const remainingStrokes = page.strokes.filter(s => !isStrokeIntersectedByScratch(s, currentStroke));
+
+        if (remainingStrokes.length !== page.strokes.length) {
+          onPageUpdate({ ...page, strokes: remainingStrokes });
+          setCurrentStroke([]);
+          return;
+        }
+      }
+
+      // 2. Check Stylus Gesture: Circle to Select
+      if (currentTool === 'pen' && isCircleGesture(currentStroke)) {
+        const circlePoly = currentStroke.map(p => ({ x: p.x, y: p.y }));
+        const selected = page.strokes.filter(s => isStrokeInPolygon(s, circlePoly));
+        
+        if (selected.length > 0) {
+          setSelectedStrokes(selected);
+          setLassoPolygon(circlePoly);
+          const bbox = VietnameseInkRecognizer.getBoundingBox(selected);
+          setLassoMenuPos({ x: bbox.x + bbox.width / 2, y: bbox.y });
+          setCurrentStroke([]);
+          return;
+        }
+      }
+
+      // Normal Pen Drawing: Save permanent stroke on canvas
       const newStroke: Stroke = {
         id: `s-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         tool: currentTool,
@@ -411,10 +508,10 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   };
 
   // Open Interactive InkToText Modal upon Lasso action
-  const handleConvertToTextModal = () => {
+  const handleConvertToTextModal = async () => {
     if (selectedStrokes.length === 0) return;
 
-    const result = VietnameseInkRecognizer.recognizeStrokes(selectedStrokes);
+    const result = await VietnameseInkRecognizer.recognizeStrokesAsync(selectedStrokes);
     setPendingRecognizedText(result.text || 'Ghi chú');
     setPendingSuggestions(result.suggestions || []);
     setPendingStrokesToReplace(result.strokesProcessed);
@@ -513,7 +610,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
             }}
             className={`absolute z-20 transition-all rounded-2xl ${
               isSelected 
-                ? 'ring-2 ring-indigo-500 shadow-2xl bg-slate-900/85 backdrop-blur-md p-3 border border-indigo-400/50' 
+                ? 'ring-2 ring-indigo-500 shadow-2xl bg-white/95 backdrop-blur-md p-3 border border-indigo-300' 
                 : 'hover:ring-1 hover:ring-slate-400/50 p-2'
             }`}
             style={{
@@ -589,10 +686,10 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
                 const updated = page.textElements.map(t => t.id === txt.id ? { ...t, text: e.target.value } : t);
                 onPageUpdate({ ...page, textElements: updated });
               }}
-              className="bg-transparent border-none outline-none resize-none w-full h-full leading-snug font-medium"
+              className="bg-transparent border-none outline-none resize-none w-full h-full leading-snug font-medium text-[#1F2937]"
               style={{
                 fontFamily: txt.fontFamily,
-                color: txt.color,
+                color: txt.color || '#1F2937',
                 fontSize: `${txt.fontSize}px`
               }}
             />
@@ -631,7 +728,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         />
       )}
 
-      {/* Interactive AI Ink To Text Modal */}
+      {/* Interactive AI Ink To Text Modal (Light UI Theme) */}
       <InkToTextModal
         isOpen={inkModalOpen}
         initialText={pendingRecognizedText}
