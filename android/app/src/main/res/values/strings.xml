@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MyNote</string>
+    <string name="title_activity_main">MyNote</string>
+    <string name="package_name">com.huuthai177.mypadnotesai</string>
+    <string name="custom_url_scheme">com.huuthai177.mypadnotesai</string>
+</resources>
