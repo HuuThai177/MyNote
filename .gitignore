@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Production output
+dist/
+build/
+web-build/
+
+# Expo / EAS
+.expo/
+*.jks
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/

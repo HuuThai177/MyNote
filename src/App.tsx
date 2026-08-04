@@ -164,7 +164,7 @@ export const App: React.FC = () => {
     handlePageUpdate({ ...currentPage, template });
   };
 
-  // Import PDF (Simulated raster rendering)
+  // Import PDF
   const handleImportPdf = () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -185,7 +185,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="relative w-full h-full flex flex-col overflow-hidden bg-slate-950">
-      {/* Top Header Navigation */}
+      {/* 1. GoodNotes Top Navigation Header */}
       <HeaderBar
         notebook={activeNotebook}
         currentPageIndex={currentPageIndex}
@@ -204,7 +204,21 @@ export const App: React.FC = () => {
         onOpenNativeGuide={() => setNativeGuideOpen(true)}
       />
 
-      {/* Main Drawing Area */}
+      {/* 2. GoodNotes Sub-Header Floating Toolbar */}
+      <Toolbar
+        currentTool={currentTool}
+        onSelectTool={setCurrentTool}
+        color={color}
+        onChangeColor={setColor}
+        size={size}
+        onChangeSize={setSize}
+        fontFamily={fontFamily}
+        onChangeFontFamily={setFontFamily}
+        smartShapeEnabled={smartShapeEnabled}
+        onToggleSmartShape={() => setSmartShapeEnabled(!smartShapeEnabled)}
+      />
+
+      {/* 3. Main Drawing Canvas Area */}
       <main className="flex-1 relative w-full h-full overflow-hidden">
         {currentPage ? (
           <CanvasArea
@@ -226,20 +240,6 @@ export const App: React.FC = () => {
           </div>
         )}
       </main>
-
-      {/* Floating Toolbar */}
-      <Toolbar
-        currentTool={currentTool}
-        onSelectTool={setCurrentTool}
-        color={color}
-        onChangeColor={setColor}
-        size={size}
-        onChangeSize={setSize}
-        fontFamily={fontFamily}
-        onChangeFontFamily={setFontFamily}
-        smartShapeEnabled={smartShapeEnabled}
-        onToggleSmartShape={() => setSmartShapeEnabled(!smartShapeEnabled)}
-      />
 
       {/* Sidebar Drawer */}
       <Sidebar
