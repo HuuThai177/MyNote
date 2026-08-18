@@ -38,4 +38,12 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Ghi âm đồng bộ nét vẽ: getUserMedia({audio:true}) trong WebView bị từ
+         chối nếu ứng dụng không giữ quyền này ở cấp hệ điều hành. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Micro là tuỳ chọn: thiết bị không có micro vẫn cài được app -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 </manifest>

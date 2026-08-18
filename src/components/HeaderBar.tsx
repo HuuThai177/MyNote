@@ -1,19 +1,19 @@
-import React from 'react';
-import { 
-  BookOpen, 
-  ChevronLeft, 
-  ChevronRight, 
-  Plus, 
-  Mic, 
-  MicOff, 
-  FileUp, 
-  Download, 
-  Smartphone, 
-  ShieldCheck, 
-  Code2,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Mic,
+  Square,
+  FileUp,
+  Download,
+  Undo2,
+  Redo2,
+  Search,
+  ImagePlus,
+  AudioLines,
+  Loader2
 } from 'lucide-react';
 import { Notebook } from '../types/notebook';
 
@@ -21,12 +21,7 @@ interface HeaderBarProps {
   notebook: Notebook | null;
   currentPageIndex: number;
   totalPages: number;
-  palmRejectionActive: boolean;
-  onTogglePalmRejection: () => void;
-  zoomLevel: number;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onResetZoom: () => void;
+  paperSizeLabel: string;
   isRecording: boolean;
   recordingTime: number;
   onToggleRecording: () => void;
@@ -36,19 +31,29 @@ interface HeaderBarProps {
   onNextPage: () => void;
   onAddPage: () => void;
   onOpenSidebar: () => void;
-  onOpenNativeGuide: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  onOpenSearch: () => void;
+  onInsertImage: () => void;
+  isImportingPdf: boolean;
+  audioNoteCount: number;
+  audioBarOpen: boolean;
+  onToggleAudioBar: () => void;
 }
+
+const formatTime = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+};
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
   notebook,
   currentPageIndex,
   totalPages,
-  palmRejectionActive,
-  onTogglePalmRejection,
-  zoomLevel,
-  onZoomIn,
-  onZoomOut,
-  onResetZoom,
+  paperSizeLabel,
   isRecording,
   recordingTime,
   onToggleRecording,
@@ -58,108 +63,96 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onNextPage,
   onAddPage,
   onOpenSidebar,
-  onOpenNativeGuide
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  onOpenSearch,
+  onInsertImage,
+  isImportingPdf,
+  audioNoteCount,
+  audioBarOpen,
+  onToggleAudioBar
 }) => {
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
+  const [showInsertMenu, setShowInsertMenu] = useState(false);
+  const insertMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!showInsertMenu) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!insertMenuRef.current?.contains(event.target as Node)) setShowInsertMenu(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showInsertMenu]);
 
   return (
-    <header className="h-16 w-full glass-panel px-4 flex items-center justify-between z-30 select-none border-b border-slate-800 shrink-0">
-      {/* Left: Sidebar Toggle & Notebook Title */}
-      <div className="flex items-center gap-3">
+    <header className="chrome-bar chrome-bar-top h-14 w-full border-b px-3 flex items-center justify-between gap-3 z-30 select-none shrink-0">
+      {/* ---------- Trái: điều hướng & tiêu đề ---------- */}
+      <div className="flex items-center gap-2 min-w-0">
         <button
           onClick={onOpenSidebar}
-          className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700/80 transition shadow-sm"
-          title="Danh sách Sổ tay & Quản lý Trang"
+          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition shrink-0"
+          title="Danh sách sổ tay & quản lý trang"
         >
-          <BookOpen className="w-5 h-5 text-indigo-400" />
-          <span className="font-bold text-xs sm:text-sm">Sổ Tay</span>
+          <BookOpen className="w-[18px] h-[18px] text-indigo-600" />
+          <span className="font-bold text-xs hidden sm:inline">Sổ Tay</span>
         </button>
 
-        <div className="h-6 w-px bg-slate-800 mx-1 hidden sm:block" />
+        <button
+          onClick={onOpenSearch}
+          className="chrome-btn w-9 h-9 border border-slate-200 shrink-0"
+          title="Tìm kiếm mọi sổ tay (Ctrl + F)"
+        >
+          <Search className="w-[18px] h-[18px]" />
+        </button>
 
-        <div className="flex flex-col">
-          <h1 className="text-sm sm:text-base font-bold text-white truncate max-w-[160px] sm:max-w-[240px]">
+        <div className="min-w-0 pl-1">
+          <h1 className="text-sm font-bold text-slate-900 truncate max-w-[150px] lg:max-w-[280px] leading-tight">
             {notebook ? notebook.title : 'Chưa chọn sổ tay'}
           </h1>
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <span className="text-indigo-400 font-semibold">{notebook?.category || 'General'}</span>
-            <span>•</span>
-            <span>Trang {currentPageIndex + 1} / {totalPages}</span>
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 leading-tight">
+            <span className="text-indigo-600 font-semibold truncate">{notebook?.category || 'Chung'}</span>
+            <span className="text-slate-300">·</span>
+            <span className="font-medium">{paperSizeLabel}</span>
           </div>
         </div>
       </div>
 
-      {/* Center: Page Controls, Zoom Controls & Status Badges */}
-      <div className="flex items-center gap-2.5">
-        {/* Palm Rejection Status Indicator */}
-        <button
-          onClick={onTogglePalmRejection}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition ${
-            palmRejectionActive
-              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 shadow-sm'
-              : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
-          }`}
-          title="Chống tì tay (CHỈ nhận bút Stylus khi bật ON, loại bỏ hoàn toàn chạm tay)"
-        >
-          <ShieldCheck className={`w-4 h-4 ${palmRejectionActive ? 'text-emerald-400 animate-pulse' : 'text-slate-400'}`} />
-          <span className="hidden md:inline">
-            {palmRejectionActive ? 'Stylus Only: ON' : 'Touch + Stylus'}
-          </span>
-        </button>
-
-        {/* Canvas Page Zoom Controller */}
-        <div className="flex items-center bg-slate-900/90 rounded-2xl border border-slate-800 p-1 shadow-inner text-xs">
-          <button
-            onClick={onZoomOut}
-            className="p-1.5 rounded-xl text-slate-300 hover:bg-slate-800 transition"
-            title="Thu nhỏ trang giấy"
-          >
-            <ZoomOut className="w-3.5 h-3.5" />
+      {/* ---------- Giữa: hoàn tác & trang ---------- */}
+      <div className="flex items-center gap-2 shrink-0">
+        <div className="chrome-group flex items-center p-1">
+          <button onClick={onUndo} disabled={!canUndo} className="chrome-btn w-8 h-8" title="Hoàn tác (Ctrl + Z)">
+            <Undo2 className="w-4 h-4" />
           </button>
-          <button
-            onClick={onResetZoom}
-            className="px-2 font-bold text-indigo-400 hover:text-indigo-300 transition"
-            title="Đặt lại tỉ lệ 100%"
-          >
-            {Math.round(zoomLevel * 100)}%
-          </button>
-          <button
-            onClick={onZoomIn}
-            className="p-1.5 rounded-xl text-slate-300 hover:bg-slate-800 transition"
-            title="Phóng to trang giấy"
-          >
-            <ZoomIn className="w-3.5 h-3.5" />
+          <button onClick={onRedo} disabled={!canRedo} className="chrome-btn w-8 h-8" title="Làm lại (Ctrl + Shift + Z)">
+            <Redo2 className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Page Switcher Pill */}
-        <div className="flex items-center bg-slate-900/90 rounded-2xl border border-slate-800 p-1 shadow-inner">
+        <div className="chrome-group flex items-center p-1">
           <button
             onClick={onPrevPage}
             disabled={currentPageIndex === 0}
-            className="p-1.5 rounded-xl text-slate-300 hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+            className="chrome-btn w-8 h-8"
             title="Trang trước"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <span className="px-2 text-xs font-extrabold text-slate-200">
-            {currentPageIndex + 1}
+          <span className="px-1.5 text-xs font-bold text-slate-700 tabular-nums whitespace-nowrap">
+            {currentPageIndex + 1}<span className="text-slate-400 font-semibold"> / {totalPages}</span>
           </span>
           <button
             onClick={onNextPage}
             disabled={currentPageIndex >= totalPages - 1}
-            className="p-1.5 rounded-xl text-slate-300 hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+            className="chrome-btn w-8 h-8"
             title="Trang sau"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
           <button
             onClick={onAddPage}
-            className="p-1.5 ml-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition shadow-md shadow-indigo-600/30"
+            className="w-8 h-8 ml-0.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center transition shadow-sm"
             title="Thêm trang mới"
           >
             <Plus className="w-4 h-4" />
@@ -167,50 +160,109 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         </div>
       </div>
 
-      {/* Right: Actions */}
-      <div className="flex items-center gap-2">
-        {/* Audio Recording Sync */}
+      {/* ---------- Phải: ghi âm, chèn, xuất ---------- */}
+      <div className="flex items-center gap-2 shrink-0">
+        {/* Bản ghi âm của trang */}
+        {audioNoteCount > 0 && (
+          <button
+            onClick={onToggleAudioBar}
+            className={`relative w-9 h-9 rounded-xl border flex items-center justify-center transition ${
+              audioBarOpen
+                ? 'bg-rose-50 text-rose-600 border-rose-300'
+                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            }`}
+            title={`Trang này có ${audioNoteCount} bản ghi âm — bấm để nghe lại`}
+          >
+            <AudioLines className="w-[18px] h-[18px] text-rose-500" />
+            <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">
+              {audioNoteCount}
+            </span>
+          </button>
+        )}
+
+        {/* Ghi âm đồng bộ nét vẽ */}
         <button
           onClick={onToggleRecording}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition border ${
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition ${
             isRecording
-              ? 'bg-rose-600 text-white border-rose-400 animate-pulse shadow-lg shadow-rose-600/40'
-              : 'bg-slate-800/90 text-slate-200 border-slate-700 hover:bg-slate-700'
+              ? 'bg-rose-600 text-white border-rose-500 shadow-md shadow-rose-200'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
           }`}
           title="Ghi âm đồng bộ nét vẽ"
         >
-          {isRecording ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4 text-rose-400" />}
-          <span className="hidden xl:inline">
-            {isRecording ? formatTime(recordingTime) : 'Ghi Âm Sync'}
-          </span>
+          {isRecording ? (
+            <>
+              <Square className="w-3.5 h-3.5 fill-current" />
+              <span className="tabular-nums">{formatTime(recordingTime)}</span>
+            </>
+          ) : (
+            <>
+              <Mic className="w-4 h-4 text-rose-500" />
+              <span className="hidden xl:inline">Ghi âm</span>
+            </>
+          )}
         </button>
 
-        {/* Import PDF */}
-        <button
-          onClick={onImportPdf}
-          className="p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
-          title="Import tài liệu PDF"
-        >
-          <FileUp className="w-4 h-4 text-blue-400" />
-        </button>
+        {/* Menu chèn nội dung — gom ảnh + PDF vào một chỗ */}
+        <div className="relative" ref={insertMenuRef}>
+          <button
+            onClick={() => setShowInsertMenu(!showInsertMenu)}
+            disabled={isImportingPdf}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition ${
+              showInsertMenu
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+            } disabled:opacity-60`}
+            title="Chèn ảnh hoặc tài liệu PDF"
+          >
+            {isImportingPdf ? <Loader2 className="w-4 h-4 animate-spin text-blue-500" /> : <Plus className="w-4 h-4 text-indigo-600" />}
+            <span className="hidden lg:inline">Chèn</span>
+          </button>
 
-        {/* Export Page */}
+          {showInsertMenu && (
+            <div className="chrome-bar chrome-bar-float absolute top-12 right-0 w-60 rounded-2xl p-1.5 z-40 border animate-pop">
+              <button
+                onClick={() => {
+                  setShowInsertMenu(false);
+                  onInsertImage();
+                }}
+                className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl hover:bg-slate-50 transition text-left"
+              >
+                <div className="p-1.5 rounded-lg bg-purple-100 text-purple-700 shrink-0">
+                  <ImagePlus className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-800">Chèn ảnh</p>
+                  <p className="text-[11px] text-slate-500">Từ thư viện hoặc camera</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowInsertMenu(false);
+                  onImportPdf();
+                }}
+                className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl hover:bg-slate-50 transition text-left"
+              >
+                <div className="p-1.5 rounded-lg bg-blue-100 text-blue-700 shrink-0">
+                  <FileUp className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-800">Import PDF</p>
+                  <p className="text-[11px] text-slate-500">Mỗi trang PDF thành một trang ghi chú</p>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Xuất trang */}
         <button
           onClick={onExportPage}
-          className="p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
-          title="Xuất trang (PDF / Markdown / TXT)"
+          className="chrome-btn w-9 h-9 border border-slate-200"
+          title="Xuất trang (PDF / PNG / Markdown / TXT)"
         >
-          <Download className="w-4 h-4 text-emerald-400" />
-        </button>
-
-        {/* Native Module Kotlin Guide */}
-        <button
-          onClick={onOpenNativeGuide}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs transition shadow-md shadow-indigo-600/30 border border-indigo-400/30"
-          title="Xem Mã nguồn Kotlin Native Module cho Xiaomi Pad"
-        >
-          <Code2 className="w-4 h-4" />
-          <span className="hidden xl:inline">Native ML Kit</span>
+          <Download className="w-[18px] h-[18px] text-emerald-600" />
         </button>
       </div>
     </header>

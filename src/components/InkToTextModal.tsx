@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Check, X, Type, Edit3, Mic, Plus, CheckCircle2, BookMarked } from 'lucide-react';
+import { Sparkles, Check, X, Mic, Plus, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { VIETNAMESE_HANDWRITING_FONTS } from '../types/notebook';
 import { VietnameseInkRecognizer } from '../engine/VietnameseInkRecognizer';
 
@@ -7,6 +7,8 @@ interface InkToTextModalProps {
   isOpen: boolean;
   initialText: string;
   suggestions?: string[];
+  /** Lý do nhận diện thất bại; hiện cảnh báo thay vì điền chữ đoán bừa */
+  errorMessage?: string | null;
   fontFamily: string;
   onConfirm: (finalText: string, selectedFont: string) => void;
   onClose: () => void;
@@ -16,6 +18,7 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
   isOpen,
   initialText,
   suggestions = [],
+  errorMessage = null,
   fontFamily: initialFont,
   onConfirm,
   onClose
@@ -84,15 +87,9 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
     }
   };
 
-  const allSuggestions = Array.from(new Set([
-    ...dictionaryList,
-    ...suggestions,
-    'Thái',
-    'Ghi chú',
-    'Học tập',
-    'Công việc',
-    'Kế hoạch'
-  ]));
+  // Phương án do engine trả về đứng trước, từ điển người dùng đứng sau.
+  // (Danh sách cứng 'Thái'/'Ghi chú'… đã bỏ vì trùng với từ điển.)
+  const allSuggestions = Array.from(new Set([...suggestions, ...dictionaryList]));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm overflow-y-auto">
@@ -116,6 +113,14 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Cảnh báo khi nhận diện thất bại */}
+        {errorMessage && (
+          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <p className="text-xs font-semibold text-amber-900 leading-relaxed">{errorMessage}</p>
+          </div>
+        )}
 
         {/* Text Input & Voice Input Button */}
         <div>

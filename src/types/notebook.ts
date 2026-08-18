@@ -1,6 +1,81 @@
-export type ToolType = 'pen' | 'highlighter' | 'eraser-stroke' | 'eraser-pixel' | 'lasso' | 'text' | 'shape';
+// 'eraser-pixel' và 'shape' đã bị bỏ: không có nút nào chọn được và không có
+// nhánh xử lý nào trong CanvasArea, nên chúng là giá trị chết.
+export type ToolType = 'pen' | 'highlighter' | 'eraser-stroke' | 'lasso' | 'text';
 
 export type PaperTemplate = 'ruled' | 'grid' | 'dot' | 'blank' | 'cornell' | 'dark-neon';
+
+/** Khổ giấy. 'custom' dùng cho trang import từ PDF (giữ đúng tỉ lệ file gốc). */
+export type PaperSizeId = 'a4' | 'a5' | 'letter' | 'square' | 'tablet' | 'infinite' | 'custom';
+
+export type PaperOrientation = 'portrait' | 'landscape';
+
+export interface PaperSizeSpec {
+  id: PaperSizeId;
+  name: string;
+  description: string;
+  /** Kích thước ở hướng dọc, đơn vị px @96dpi (A4 = 210mm × 297mm) */
+  width: number;
+  height: number;
+  supportsOrientation: boolean;
+}
+
+export const PAPER_SIZES: PaperSizeSpec[] = [
+  {
+    id: 'a4',
+    name: 'A4 (210 × 297 mm)',
+    description: 'Khổ chuẩn để in và nộp bài',
+    width: 794,
+    height: 1123,
+    supportsOrientation: true
+  },
+  {
+    id: 'a5',
+    name: 'A5 (148 × 210 mm)',
+    description: 'Sổ tay nhỏ, ghi chú nhanh',
+    width: 559,
+    height: 794,
+    supportsOrientation: true
+  },
+  {
+    id: 'letter',
+    name: 'Letter (8.5 × 11 in)',
+    description: 'Khổ giấy chuẩn Mỹ',
+    width: 816,
+    height: 1056,
+    supportsOrientation: true
+  },
+  {
+    id: 'square',
+    name: 'Vuông (1:1)',
+    description: 'Sơ đồ tư duy, phác thảo',
+    width: 900,
+    height: 900,
+    supportsOrientation: false
+  },
+  {
+    id: 'tablet',
+    name: 'Màn hình Tablet (16:10)',
+    description: 'Vừa khít màn hình Xiaomi Pad',
+    width: 800,
+    height: 1280,
+    supportsOrientation: true
+  },
+  {
+    id: 'infinite',
+    name: 'Giấy Cuộn Vô Hạn',
+    description: 'Tự dài thêm khi bạn viết tới cuối trang',
+    width: 794,
+    height: 1123,
+    supportsOrientation: false
+  }
+];
+
+export const DEFAULT_PAPER_SIZE: PaperSizeId = 'a4';
+export const DEFAULT_ORIENTATION: PaperOrientation = 'portrait';
+
+/** Giới hạn zoom của trang giấy */
+export const MIN_ZOOM = 0.25;
+export const MAX_ZOOM = 4;
 
 export interface Point {
   x: number;
@@ -39,12 +114,22 @@ export interface ImageElement {
   width: number;
   height: number;
   rotation: number;
+  /**
+   * URL dùng để hiển thị trong phiên hiện tại (Object URL).
+   * KHÔNG được lưu xuống IndexedDB — nó vô nghĩa ở phiên sau.
+   */
   src: string;
+  /** Khoá tới Blob trong store `assets`; đây mới là thứ được lưu bền */
+  assetId?: string;
 }
 
 export interface AudioNote {
   id: string;
-  url: string;
+  title?: string;
+  /** Object URL của phiên hiện tại — không lưu xuống IndexedDB */
+  url?: string;
+  /** Khoá tới Blob âm thanh trong store `assets` */
+  assetId?: string;
   duration: number; // in seconds
   createdAt: number;
 }
@@ -53,8 +138,18 @@ export interface NotebookPage {
   id: string;
   pageIndex: number;
   template: PaperTemplate;
+  /** Khổ giấy; mặc định 'a4' khi thiếu (dữ liệu bản cũ) */
+  paperSize?: PaperSizeId;
+  orientation?: PaperOrientation;
+  /** Chỉ dùng khi paperSize === 'custom' (trang PDF) */
+  pageWidth?: number;
+  pageHeight?: number;
   pdfPageNumber?: number;
-  pdfDataUrl?: string; // Cache rendered PDF image
+  /** Object URL ảnh nền PDF của phiên hiện tại — không lưu xuống IndexedDB */
+  pdfDataUrl?: string;
+  /** Khoá tới Blob ảnh nền PDF trong store `assets` */
+  pdfAssetId?: string;
+  pdfSourceName?: string;
   strokes: Stroke[];
   textElements: TextElement[];
   imageElements: ImageElement[];
@@ -68,6 +163,9 @@ export interface Notebook {
   coverColor: string;
   createdAt: number;
   updatedAt: number;
+  /** Khổ giấy mặc định khi thêm trang mới vào sổ tay này */
+  defaultPaperSize?: PaperSizeId;
+  defaultOrientation?: PaperOrientation;
   pdfFileName?: string;
   pdfFileUrl?: string;
   pages: NotebookPage[];

@@ -1,26 +1,32 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { 
-  Stroke, 
-  Point, 
-  ToolType, 
-  NotebookPage, 
-  TextElement, 
+import React, { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import {
+  Stroke,
+  Point,
+  ToolType,
+  NotebookPage,
+  TextElement,
   ImageElement,
-  VIETNAMESE_HANDWRITING_FONTS
+  VIETNAMESE_HANDWRITING_FONTS,
+  MIN_ZOOM,
+  MAX_ZOOM
 } from '../types/notebook';
+import { getPageDimensions, clampZoom } from '../engine/PageGeometry';
 import { ShapeSmoother } from '../engine/ShapeSmoother';
-import { VietnameseInkRecognizer } from '../engine/VietnameseInkRecognizer';
+import { VietnameseInkRecognizer, InkRecognitionError } from '../engine/VietnameseInkRecognizer';
 import { LassoContextMenu } from './LassoContextMenu';
 import { InkToTextModal } from './InkToTextModal';
-import { 
-  Grip, 
-  Trash2, 
-  Sparkles, 
-  Type, 
-  Plus, 
-  Minus, 
+import {
+  Grip,
+  Trash2,
+  Sparkles,
+  Type,
+  Plus,
+  Minus,
   Maximize2,
-  Check
+  Check,
+  MousePointerClick,
+  AudioLines,
+  PenLine
 } from 'lucide-react';
 
 interface CanvasAreaProps {
@@ -32,10 +38,31 @@ interface CanvasAreaProps {
   smartShapeEnabled: boolean;
   palmRejectionActive: boolean;
   zoomLevel: number;
-  onPageUpdate: (updatedPage: NotebookPage) => void;
+  /** `coalesceKey` gộp một chuỗi thao tác liên tục thành 1 bước hoàn tác */
+  onPageUpdate: (updatedPage: NotebookPage, coalesceKey?: string) => void;
   audioRecordingTime: number;
   isRecordingAudio: boolean;
+  /** Chạm vào nét vẽ để nghe lại đúng đoạn ghi âm */
+  audioSeekMode: boolean;
+  onSeekAudioFromStroke: (timeInSeconds: number) => void;
+  /** Mốc thời gian đang phát, dùng để làm sáng nét vẽ tương ứng */
+  playbackTime: number | null;
+  /** Bật bảng viết tay để điền chữ vào khung chữ này */
+  onRequestInkInput: (textElementId: string) => void;
+  /** Khung chữ đang nhận chữ từ bảng viết tay */
+  inkInputTargetId: string | null;
+  /** Pinch / Ctrl+lăn chuột / nút "vừa khung" đều đổi zoom qua đây */
+  onZoomChange: (zoom: number) => void;
+  /** Yêu cầu canh trang vừa khung nhìn; token tăng mỗi lần bấm nút */
+  fitRequest: { mode: 'width' | 'page'; token: number } | null;
 }
+
+/** Cửa sổ thời gian (giây) quanh mốc đang phát để làm sáng nét vẽ */
+const PLAYBACK_HIGHLIGHT_WINDOW = 1.2;
+/** Lề quanh trang giấy trong vùng cuộn (px màn hình) */
+const SHEET_MARGIN = 28;
+/** Trần độ phân giải canvas để tablet không cạn RAM khi zoom sâu */
+const MAX_RENDER_SCALE = 2.5;
 
 export const CanvasArea: React.FC<CanvasAreaProps> = ({
   page,
@@ -48,16 +75,59 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   zoomLevel,
   onPageUpdate,
   audioRecordingTime,
-  isRecordingAudio
+  isRecordingAudio,
+  audioSeekMode,
+  onSeekAudioFromStroke,
+  playbackTime,
+  onRequestInkInput,
+  inkInputTargetId,
+  onZoomChange,
+  fitRequest
 }) => {
+  /** Lớp tĩnh: nét đã lưu — chỉ vẽ lại khi tập nét thay đổi */
+  const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** Lớp động: nét đang vẽ dở & khung lasso — vẽ lại theo từng điểm bút */
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+
+  // Kích thước LOGIC của trang giấy — không phụ thuộc zoom hay cửa sổ.
+  // Toàn bộ toạ độ nét vẽ, khung chữ, ảnh đều nằm trong hệ toạ độ này.
+  const pageDimensions = useMemo(() => getPageDimensions(page), [page]);
+  const { width: pageWidth, height: pageHeight } = pageDimensions;
+
+  // Độ phân giải thực của canvas: zoom càng sâu càng cần nhiều pixel để nét
+  // mực không bị rỗ, nhưng phải có trần để không cạn RAM.
+  const renderScale = useMemo(() => {
+    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    return Math.min(MAX_RENDER_SCALE, Math.max(1, zoomLevel * dpr));
+  }, [zoomLevel]);
+
+  // Mỗi cử chỉ (kéo, resize) sinh một key riêng để History gộp thành 1 bước undo
+  const gestureKeyRef = useRef<string>('');
+  const beginGesture = (prefix: string) => {
+    gestureKeyRef.current = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    return gestureKeyRef.current;
+  };
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
   const [lassoPolygon, setLassoPolygon] = useState<{ x: number; y: number }[]>([]);
   const [selectedStrokes, setSelectedStrokes] = useState<Stroke[]>([]);
+  // Lasso chọn được cả khung chữ và ảnh, không chỉ nét vẽ
+  const [selectedTextIds, setSelectedTextIds] = useState<string[]>([]);
+  const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [lassoMenuPos, setLassoMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  const selectionCount = selectedStrokes.length + selectedTextIds.length + selectedImageIds.length;
+
+  const clearSelection = () => {
+    setLassoPolygon([]);
+    setSelectedStrokes([]);
+    setSelectedTextIds([]);
+    setSelectedImageIds([]);
+    setLassoMenuPos(null);
+  };
 
   // Lasso Selection Dragging & Scale State
   const [isDraggingLasso, setIsDraggingLasso] = useState(false);
@@ -70,12 +140,21 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [resizeStart, setResizeStart] = useState<{ x: number; y: number; w: number; h: number; font: number }>({ x: 0, y: 0, w: 0, h: 0, font: 0 });
 
+  // Active Selected Image Element State
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [isResizingImage, setIsResizingImage] = useState(false);
+  const [imageDragOffset, setImageDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [imageResizeStart, setImageResizeStart] = useState<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 0, h: 0 });
+
   // Interactive InkToText Edit Modal State
   const [inkModalOpen, setInkModalOpen] = useState(false);
   const [pendingRecognizedText, setPendingRecognizedText] = useState('');
   const [pendingSuggestions, setPendingSuggestions] = useState<string[]>([]);
   const [pendingStrokesToReplace, setPendingStrokesToReplace] = useState<string[]>([]);
   const [pendingBbox, setPendingBbox] = useState<{ x: number; y: number; width: number; height: number }>({ x: 0, y: 0, width: 300, height: 80 });
+  const [pendingError, setPendingError] = useState<string | null>(null);
+  const [isRecognizingSelection, setIsRecognizingSelection] = useState(false);
 
   const shapeHoldTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -86,42 +165,232 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   }, [currentTool]);
 
-  // Synchronize Canvas DPI & Resize
+  // Backing store của cả hai lớp gắn với KHỔ GIẤY, không gắn với cửa sổ.
+  // Zoom chỉ làm tăng độ phân giải, không thay đổi hệ toạ độ trang.
   useEffect(() => {
-    const handleResize = () => {
-      if (!canvasRef.current || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const canvas = canvasRef.current;
-      canvas.width = rect.width / zoomLevel;
-      canvas.height = rect.height / zoomLevel;
-      renderCanvas();
+    const backingWidth = Math.round(pageWidth * renderScale);
+    const backingHeight = Math.round(pageHeight * renderScale);
+
+    [staticCanvasRef.current, canvasRef.current].forEach(canvas => {
+      if (!canvas) return;
+      canvas.width = backingWidth;
+      canvas.height = backingHeight;
+    });
+
+    renderStaticLayer();
+    renderDynamicLayer();
+  }, [pageWidth, pageHeight, renderScale]);
+
+  // ---------------------------------------------------------------------------
+  // Khung nhìn: cuộn trang, neo điểm zoom, pinch, Ctrl + lăn chuột
+  // ---------------------------------------------------------------------------
+  const previousZoomRef = useRef(zoomLevel);
+  /** Điểm (toạ độ màn hình) cần giữ cố định khi zoom; null = giữa khung nhìn */
+  const zoomAnchorRef = useRef<{ x: number; y: number } | null>(null);
+  const pinchRef = useRef<{ startDistance: number; startZoom: number } | null>(null);
+  const lastPinchMidpointRef = useRef<{ x: number; y: number } | null>(null);
+  /** Trạng thái kéo trang bằng 1 ngón / chuột (khi Palm Rejection đang bật) */
+  const panRef = useRef<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
+
+  /**
+   * Vị trí cuộn được ghi lại qua sự kiện scroll.
+   * Cần thiết vì khi zoom nhỏ lại, lớp đệm co lại và trình duyệt tự kẹp
+   * scrollLeft/scrollTop trước khi useLayoutEffect chạy — đọc trực tiếp từ DOM
+   * lúc đó sẽ ra giá trị đã bị kẹp, làm điểm neo zoom bị lệch.
+   */
+  const scrollPositionRef = useRef({ left: 0, top: 0 });
+
+  /**
+   * Sau khi zoom đổi, dịch vùng cuộn sao cho điểm neo nằm nguyên vị trí cũ
+   * trên màn hình — nếu không, trang sẽ "nhảy" về góc trên-trái mỗi lần zoom.
+   */
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    const previousZoom = previousZoomRef.current;
+    previousZoomRef.current = zoomLevel;
+
+    if (!scroller || previousZoom === zoomLevel || previousZoom <= 0) return;
+
+    const ratio = zoomLevel / previousZoom;
+    const rect = scroller.getBoundingClientRect();
+    const anchor = zoomAnchorRef.current;
+    const anchorX = anchor ? anchor.x - rect.left : scroller.clientWidth / 2;
+    const anchorY = anchor ? anchor.y - rect.top : scroller.clientHeight / 2;
+
+    const before = scrollPositionRef.current;
+    const nextLeft = (before.left + anchorX) * ratio - anchorX;
+    const nextTop = (before.top + anchorY) * ratio - anchorY;
+
+    scroller.scrollLeft = Math.max(0, nextLeft);
+    scroller.scrollTop = Math.max(0, nextTop);
+    scrollPositionRef.current = { left: scroller.scrollLeft, top: scroller.scrollTop };
+    zoomAnchorRef.current = null;
+  }, [zoomLevel]);
+
+  // Pinch 2 ngón để zoom + Ctrl/⌘ & lăn chuột.
+  // Phải dùng listener native với passive:false vì React gắn touchmove/wheel ở
+  // chế độ passive nên preventDefault() trong onTouchMove sẽ không có tác dụng.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+
+    const distanceBetween = (touches: TouchList) =>
+      Math.hypot(
+        touches[0].clientX - touches[1].clientX,
+        touches[0].clientY - touches[1].clientY
+      );
+
+    const midpointOf = (touches: TouchList) => ({
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2
+    });
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length === 2) {
+        pinchRef.current = {
+          startDistance: distanceBetween(event.touches),
+          startZoom: zoomLevel
+        };
+        lastPinchMidpointRef.current = midpointOf(event.touches);
+      }
     };
 
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [page, zoomLevel]);
+    // Hai ngón làm cả hai việc cùng lúc: khoảng cách -> zoom, trung điểm -> pan
+    const handleTouchMove = (event: TouchEvent) => {
+      const pinch = pinchRef.current;
+      if (event.touches.length !== 2 || !pinch || pinch.startDistance <= 0) return;
 
-  // Main Render Canvas Function
-  const renderCanvas = () => {
+      event.preventDefault();
+      const midpoint = midpointOf(event.touches);
+
+      const previousMidpoint = lastPinchMidpointRef.current;
+      if (previousMidpoint) {
+        scroller.scrollLeft -= midpoint.x - previousMidpoint.x;
+        scroller.scrollTop -= midpoint.y - previousMidpoint.y;
+      }
+      lastPinchMidpointRef.current = midpoint;
+
+      const scale = distanceBetween(event.touches) / pinch.startDistance;
+      zoomAnchorRef.current = midpoint;
+      onZoomChange(clampZoom(pinch.startZoom * scale, MIN_ZOOM, MAX_ZOOM));
+    };
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      if (event.touches.length < 2) {
+        pinchRef.current = null;
+        lastPinchMidpointRef.current = null;
+      }
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      // Trackpad pinch trên desktop cũng phát wheel kèm ctrlKey
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      zoomAnchorRef.current = { x: event.clientX, y: event.clientY };
+      onZoomChange(clampZoom(zoomLevel * (event.deltaY < 0 ? 1.12 : 1 / 1.12), MIN_ZOOM, MAX_ZOOM));
+    };
+
+    scroller.addEventListener('touchstart', handleTouchStart, { passive: true });
+    scroller.addEventListener('touchmove', handleTouchMove, { passive: false });
+    scroller.addEventListener('touchend', handleTouchEnd, { passive: true });
+    scroller.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+    scroller.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      scroller.removeEventListener('touchstart', handleTouchStart);
+      scroller.removeEventListener('touchmove', handleTouchMove);
+      scroller.removeEventListener('touchend', handleTouchEnd);
+      scroller.removeEventListener('touchcancel', handleTouchEnd);
+      scroller.removeEventListener('wheel', handleWheel);
+    };
+  }, [zoomLevel, onZoomChange]);
+
+  // Canh trang vừa chiều ngang / vừa toàn trang
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!fitRequest || !scroller) return;
+
+    const availableWidth = scroller.clientWidth - SHEET_MARGIN * 2;
+    const availableHeight = scroller.clientHeight - SHEET_MARGIN * 2;
+    if (availableWidth <= 0 || availableHeight <= 0) return;
+
+    const target =
+      fitRequest.mode === 'width'
+        ? availableWidth / pageWidth
+        : Math.min(availableWidth / pageWidth, availableHeight / pageHeight);
+
+    zoomAnchorRef.current = null;
+    onZoomChange(clampZoom(target, MIN_ZOOM, MAX_ZOOM));
+
+    // Về đầu trang để thấy ngay phần trên cùng
+    requestAnimationFrame(() => {
+      scroller.scrollTop = 0;
+    });
+  }, [fitRequest?.token]);
+
+  /** LỚP TĨNH — nét đã lưu và vệt sáng đồng bộ âm thanh */
+  const renderStaticLayer = () => {
+    const canvas = staticCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Mọi lệnh vẽ bên dưới dùng đơn vị toạ độ TRANG; renderScale chỉ là độ nét.
+    ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+    ctx.clearRect(0, 0, pageWidth, pageHeight);
+
+    // 0. Audio Sync Halo: làm sáng những nét được viết đúng thời điểm đang phát
+    if (playbackTime !== null) {
+      page.strokes.forEach(stroke => {
+        if (stroke.audioTimestamp === undefined) return;
+        if (Math.abs(stroke.audioTimestamp - playbackTime) > PLAYBACK_HIGHLIGHT_WINDOW) return;
+
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = stroke.size * 3 + 8;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = '#f59e0b';
+        ctx.shadowBlur = 16;
+        ctx.beginPath();
+        stroke.points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        ctx.stroke();
+        ctx.restore();
+      });
+    }
+
+    // 1. Nét đã lưu
+    page.strokes.forEach(stroke => {
+      drawSingleStroke(ctx, stroke.points, stroke.color, stroke.size, stroke.tool);
+    });
+  };
+
+  /**
+   * LỚP ĐỘNG — chỉ nét đang vẽ dở và khung lasso.
+   *
+   * Đây là lớp duy nhất được vẽ lại theo từng điểm bút. Trước khi tách, mỗi
+   * điểm bút vẽ lại toàn bộ nét đã có của cả trang; trên khổ A4 ở độ phân giải
+   * ~1985×2807 thì vài trăm nét là bắt đầu giật.
+   */
+  const renderDynamicLayer = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+    ctx.clearRect(0, 0, pageWidth, pageHeight);
 
-    // 1. Render Existing Permanent Strokes
-    page.strokes.forEach(stroke => {
-      drawSingleStroke(ctx, stroke.points, stroke.color, stroke.size, stroke.tool);
-    });
-
-    // 2. Render Active Stroke (In Progress)
     if (currentStroke.length > 0) {
       drawSingleStroke(ctx, currentStroke, color, size, currentTool);
     }
 
-    // 3. Render Lasso Selection Polygon & Bounding Box
     if (lassoPolygon.length > 1) {
       ctx.save();
       ctx.beginPath();
@@ -130,19 +399,25 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         ctx.lineTo(lassoPolygon[i].x, lassoPolygon[i].y);
       }
       ctx.closePath();
-      ctx.strokeStyle = '#6366f1';
+      ctx.strokeStyle = '#4f46e5';
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 6]);
-      ctx.fillStyle = 'rgba(99, 102, 241, 0.15)';
+      ctx.fillStyle = 'rgba(79, 70, 229, 0.14)';
       ctx.fill();
       ctx.stroke();
       ctx.restore();
     }
   };
 
+  // Lớp tĩnh chỉ vẽ lại khi tập nét thay đổi (nhấc bút, xoá, hoàn tác)
   useEffect(() => {
-    renderCanvas();
-  }, [page.strokes, currentStroke, lassoPolygon]);
+    renderStaticLayer();
+  }, [page.strokes, playbackTime, renderScale, pageWidth, pageHeight]);
+
+  // Lớp động vẽ lại theo từng điểm bút — nhưng chỉ có đúng một nét trên đó
+  useEffect(() => {
+    renderDynamicLayer();
+  }, [currentStroke, lassoPolygon, renderScale, pageWidth, pageHeight, color, size, currentTool]);
 
   // Smooth Bezier Drawing
   const drawSingleStroke = (
@@ -201,28 +476,45 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   // Pointer Down on Canvas
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    // Deselect text box when drawing on canvas
-    if (selectedTextId) {
-      setSelectedTextId(null);
-    }
+    // Deselect text / image box when drawing on canvas
+    if (selectedTextId) setSelectedTextId(null);
+    if (selectedImageId) setSelectedImageId(null);
 
-    // STRICT PALM REJECTION: When ON, strictly allow ONLY Stylus / Pen pointers (e.pointerType === 'pen')
-    // Completely rejects finger touch (pointerType === 'touch') or mouse when Palm Rejection is active
-    if (palmRejectionActive && e.pointerType !== 'pen') {
+    if (!canvasRef.current) return;
+    const { x, y } = toCanvasPoint(e.clientX, e.clientY);
+
+    // AUDIO SYNC: chạm vào nét vẽ để nhảy tới đoạn ghi âm lúc viết nét đó.
+    // Kiểm tra trước Palm Rejection để chạm bằng ngón tay vẫn hoạt động.
+    if (audioSeekMode) {
+      const hit = findNearestStrokeWithAudio(x, y);
+      if (hit?.audioTimestamp !== undefined) {
+        onSeekAudioFromStroke(hit.audioTimestamp);
+      }
       return;
     }
 
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    // STRICT PALM REJECTION: When ON, strictly allow ONLY Stylus / Pen pointers (e.pointerType === 'pen')
+    // Ngón tay & chuột không vẽ nữa mà dùng để KÉO CUỘN trang giấy.
+    if (palmRejectionActive && e.pointerType !== 'pen') {
+      const scroller = scrollerRef.current;
+      if (scroller && !pinchRef.current) {
+        panRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          scrollLeft: scroller.scrollLeft,
+          scrollTop: scroller.scrollTop
+        };
+      }
+      return;
+    }
 
-    const x = (e.clientX - rect.left) / zoomLevel;
-    const y = (e.clientY - rect.top) / zoomLevel;
     const pressure = e.pressure > 0 ? e.pressure : 0.6;
     const pt: Point = { x, y, pressure, time: Date.now() };
 
     // Check if clicking inside active Lasso Selection area to DRAG MOVE objects
-    if (selectedStrokes.length > 0 && lassoPolygon.length > 2) {
+    if (selectionCount > 0 && lassoPolygon.length > 2) {
       if (isPointInPolygon({ x, y }, lassoPolygon)) {
+        beginGesture('lasso-move');
         setIsDraggingLasso(true);
         setLassoDragLastPos({ x, y });
         return;
@@ -232,10 +524,10 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     setIsDrawing(true);
 
     if (currentTool === 'lasso') {
+      clearSelection();
       setLassoPolygon([{ x, y }]);
-      setSelectedStrokes([]);
-      setLassoMenuPos(null);
     } else if (currentTool.startsWith('eraser')) {
+      beginGesture('erase');
       eraseAtPoint(x, y);
     } else if (currentTool === 'text') {
       addTextElementAt(x, y);
@@ -253,41 +545,52 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   // Pointer Move
   const handlePointerMove = (e: React.PointerEvent<HTMLElement> | any) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    // Kéo cuộn trang bằng ngón tay / chuột — pinch 2 ngón được ưu tiên hơn
+    const pan = panRef.current;
+    if (pan) {
+      const scroller = scrollerRef.current;
+      if (scroller && !pinchRef.current) {
+        scroller.scrollLeft = pan.scrollLeft - (e.clientX - pan.startX);
+        scroller.scrollTop = pan.scrollTop - (e.clientY - pan.startY);
+      }
+      return;
+    }
 
-    const x = (e.clientX - rect.left) / zoomLevel;
-    const y = (e.clientY - rect.top) / zoomLevel;
+    if (!canvasRef.current) return;
+    const { x, y } = toCanvasPoint(e.clientX, e.clientY);
 
     // Handle Dragging / Moving Lasso Selected Objects
-    if (isDraggingLasso && lassoDragLastPos && selectedStrokes.length > 0) {
+    if (isDraggingLasso && lassoDragLastPos && selectionCount > 0) {
       const dx = x - lassoDragLastPos.x;
       const dy = y - lassoDragLastPos.y;
       setLassoDragLastPos({ x, y });
 
-      const selectedIds = selectedStrokes.map(s => s.id);
+      const strokeIds = selectedStrokes.map(s => s.id);
 
-      // Shift selected strokes points
-      const updatedStrokes = page.strokes.map(stroke => {
-        if (selectedIds.includes(stroke.id)) {
-          return {
-            ...stroke,
-            points: stroke.points.map(p => ({ ...p, x: p.x + dx, y: p.y + dy }))
-          };
-        }
-        return stroke;
-      });
+      const updatedStrokes = page.strokes.map(stroke =>
+        strokeIds.includes(stroke.id)
+          ? { ...stroke, points: stroke.points.map(p => ({ ...p, x: p.x + dx, y: p.y + dy })) }
+          : stroke
+      );
 
-      // Shift lasso polygon
-      const updatedPoly = lassoPolygon.map(p => ({ x: p.x + dx, y: p.y + dy }));
-      const updatedSelected = updatedStrokes.filter(s => selectedIds.includes(s.id));
+      const updatedTexts = page.textElements.map(t =>
+        selectedTextIds.includes(t.id) ? { ...t, x: t.x + dx, y: t.y + dy } : t
+      );
 
-      setLassoPolygon(updatedPoly);
-      setSelectedStrokes(updatedSelected);
-      onPageUpdate({ ...page, strokes: updatedStrokes });
+      const updatedImages = page.imageElements.map(i =>
+        selectedImageIds.includes(i.id) ? { ...i, x: i.x + dx, y: i.y + dy } : i
+      );
+
+      setLassoPolygon(lassoPolygon.map(p => ({ x: p.x + dx, y: p.y + dy })));
+      setSelectedStrokes(updatedStrokes.filter(s => strokeIds.includes(s.id)));
+
+      onPageUpdate(
+        { ...page, strokes: updatedStrokes, textElements: updatedTexts, imageElements: updatedImages },
+        gestureKeyRef.current
+      );
 
       if (lassoMenuPos) {
-        setLassoMenuPos({ x: (lassoMenuPos.x + dx * zoomLevel), y: (lassoMenuPos.y + dy * zoomLevel) });
+        setLassoMenuPos({ x: lassoMenuPos.x + dx * zoomLevel, y: lassoMenuPos.y + dy * zoomLevel });
       }
       return;
     }
@@ -304,7 +607,32 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         }
         return t;
       });
-      onPageUpdate({ ...page, textElements: updated });
+      onPageUpdate({ ...page, textElements: updated }, gestureKeyRef.current);
+      return;
+    }
+
+    // Dragging Image Element
+    if (isDraggingImage && selectedImageId) {
+      const updated = page.imageElements.map(img =>
+        img.id === selectedImageId
+          ? { ...img, x: Math.max(0, x - imageDragOffset.x), y: Math.max(0, y - imageDragOffset.y) }
+          : img
+      );
+      onPageUpdate({ ...page, imageElements: updated }, gestureKeyRef.current);
+      return;
+    }
+
+    // Resizing Image Element (giữ nguyên tỉ lệ khung hình gốc)
+    if (isResizingImage && selectedImageId) {
+      const ratio = imageResizeStart.h / Math.max(1, imageResizeStart.w);
+      const newWidth = Math.max(60, imageResizeStart.w + (x - imageResizeStart.x));
+
+      const updated = page.imageElements.map(img =>
+        img.id === selectedImageId
+          ? { ...img, width: Math.round(newWidth), height: Math.round(newWidth * ratio) }
+          : img
+      );
+      onPageUpdate({ ...page, imageElements: updated }, gestureKeyRef.current);
       return;
     }
 
@@ -328,7 +656,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         }
         return t;
       });
-      onPageUpdate({ ...page, textElements: updated });
+      onPageUpdate({ ...page, textElements: updated }, gestureKeyRef.current);
       return;
     }
 
@@ -418,6 +746,11 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   // Pointer Up
   const handlePointerUp = () => {
+    if (panRef.current) {
+      panRef.current = null;
+      return;
+    }
+
     if (isDraggingLasso) {
       setIsDraggingLasso(false);
       setLassoDragLastPos(null);
@@ -425,6 +758,8 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
     if (isDraggingText) setIsDraggingText(false);
     if (isResizingText) setIsResizingText(false);
+    if (isDraggingImage) setIsDraggingImage(false);
+    if (isResizingImage) setIsResizingImage(false);
 
     if (!isDrawing) return;
     setIsDrawing(false);
@@ -432,12 +767,14 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     if (shapeHoldTimer.current) clearTimeout(shapeHoldTimer.current);
 
     if (currentTool === 'lasso' && lassoPolygon.length > 2) {
-      const selected = page.strokes.filter(s => isStrokeInPolygon(s, lassoPolygon));
-      setSelectedStrokes(selected);
+      const { strokes, textIds, imageIds } = collectSelection(lassoPolygon);
+      setSelectedStrokes(strokes);
+      setSelectedTextIds(textIds);
+      setSelectedImageIds(imageIds);
 
-      if (selected.length > 0) {
-        const bbox = VietnameseInkRecognizer.getBoundingBox(selected);
-        setLassoMenuPos({ x: (bbox.x + bbox.width / 2) * zoomLevel, y: bbox.y * zoomLevel });
+      if (strokes.length + textIds.length + imageIds.length > 0) {
+        const bbox = getSelectionBounds(strokes, textIds, imageIds);
+        setLassoMenuPos(toClientPoint(bbox.x + bbox.width / 2, bbox.y));
       } else {
         setLassoPolygon([]);
       }
@@ -456,13 +793,15 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       // 2. Check Stylus Gesture: Circle to Select
       if (currentTool === 'pen' && isCircleGesture(currentStroke)) {
         const circlePoly = currentStroke.map(p => ({ x: p.x, y: p.y }));
-        const selected = page.strokes.filter(s => isStrokeInPolygon(s, circlePoly));
-        
-        if (selected.length > 0) {
-          setSelectedStrokes(selected);
+        const { strokes, textIds, imageIds } = collectSelection(circlePoly);
+
+        if (strokes.length + textIds.length + imageIds.length > 0) {
+          setSelectedStrokes(strokes);
+          setSelectedTextIds(textIds);
+          setSelectedImageIds(imageIds);
           setLassoPolygon(circlePoly);
-          const bbox = VietnameseInkRecognizer.getBoundingBox(selected);
-          setLassoMenuPos({ x: (bbox.x + bbox.width / 2) * zoomLevel, y: bbox.y * zoomLevel });
+          const bbox = getSelectionBounds(strokes, textIds, imageIds);
+          setLassoMenuPos(toClientPoint(bbox.x + bbox.width / 2, bbox.y));
           setCurrentStroke([]);
           return;
         }
@@ -487,55 +826,151 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   };
 
-  // Scale / Resize Selected Objects in Lasso Area
+  // Phóng to / thu nhỏ mọi đối tượng trong vùng khoanh quanh tâm khung bao
   const handleScaleSelectedStrokes = (scaleFactor: number) => {
-    if (selectedStrokes.length === 0) return;
+    if (selectionCount === 0) return;
 
-    const bbox = VietnameseInkRecognizer.getBoundingBox(selectedStrokes);
+    const bbox = getSelectionBounds(selectedStrokes, selectedTextIds, selectedImageIds);
     const centerX = bbox.x + bbox.width / 2;
     const centerY = bbox.y + bbox.height / 2;
-    const selectedIds = selectedStrokes.map(s => s.id);
+    const strokeIds = selectedStrokes.map(s => s.id);
 
-    const updatedStrokes = page.strokes.map(stroke => {
-      if (selectedIds.includes(stroke.id)) {
-        return {
-          ...stroke,
-          size: Math.max(1, stroke.size * scaleFactor),
-          points: stroke.points.map(p => ({
-            ...p,
-            x: centerX + (p.x - centerX) * scaleFactor,
-            y: centerY + (p.y - centerY) * scaleFactor
-          }))
-        };
-      }
-      return stroke;
+    const scaleAround = (value: number, center: number) => center + (value - center) * scaleFactor;
+
+    const updatedStrokes = page.strokes.map(stroke =>
+      strokeIds.includes(stroke.id)
+        ? {
+            ...stroke,
+            size: Math.max(1, stroke.size * scaleFactor),
+            points: stroke.points.map(p => ({
+              ...p,
+              x: scaleAround(p.x, centerX),
+              y: scaleAround(p.y, centerY)
+            }))
+          }
+        : stroke
+    );
+
+    const updatedTexts = page.textElements.map(t =>
+      selectedTextIds.includes(t.id)
+        ? {
+            ...t,
+            x: scaleAround(t.x, centerX),
+            y: scaleAround(t.y, centerY),
+            width: Math.max(60, t.width * scaleFactor),
+            height: Math.max(30, t.height * scaleFactor),
+            fontSize: Math.min(96, Math.max(10, Math.round(t.fontSize * scaleFactor)))
+          }
+        : t
+    );
+
+    const updatedImages = page.imageElements.map(i =>
+      selectedImageIds.includes(i.id)
+        ? {
+            ...i,
+            x: scaleAround(i.x, centerX),
+            y: scaleAround(i.y, centerY),
+            width: Math.max(20, i.width * scaleFactor),
+            height: Math.max(20, i.height * scaleFactor)
+          }
+        : i
+    );
+
+    setLassoPolygon(
+      lassoPolygon.map(p => ({ x: scaleAround(p.x, centerX), y: scaleAround(p.y, centerY) }))
+    );
+
+    const updatedSelectedStrokes = updatedStrokes.filter(s => strokeIds.includes(s.id));
+    setSelectedStrokes(updatedSelectedStrokes);
+
+    onPageUpdate({
+      ...page,
+      strokes: updatedStrokes,
+      textElements: updatedTexts,
+      imageElements: updatedImages
     });
 
-    const updatedPoly = lassoPolygon.map(p => ({
-      x: centerX + (p.x - centerX) * scaleFactor,
-      y: centerY + (p.y - centerY) * scaleFactor
-    }));
-
-    const updatedSelected = updatedStrokes.filter(s => selectedIds.includes(s.id));
-
-    setLassoPolygon(updatedPoly);
-    setSelectedStrokes(updatedSelected);
-    onPageUpdate({ ...page, strokes: updatedStrokes });
-
-    const newBbox = VietnameseInkRecognizer.getBoundingBox(updatedSelected);
-    setLassoMenuPos({ x: (newBbox.x + newBbox.width / 2) * zoomLevel, y: newBbox.y * zoomLevel });
+    const scaledBbox = {
+      x: scaleAround(bbox.x, centerX),
+      y: scaleAround(bbox.y, centerY),
+      width: bbox.width * scaleFactor
+    };
+    setLassoMenuPos(toClientPoint(scaledBbox.x + scaledBbox.width / 2, scaledBbox.y));
   };
 
   // Eraser collision
   const eraseAtPoint = (x: number, y: number) => {
     const eraserRadius = size * 2.5;
-    const updatedStrokes = page.strokes.filter(stroke => {
-      return !stroke.points.some(p => Math.hypot(p.x - x, p.y - y) < eraserRadius);
+
+    const updatedStrokes = page.strokes.filter(
+      stroke => !stroke.points.some(p => Math.hypot(p.x - x, p.y - y) < eraserRadius)
+    );
+
+    // Khung chữ và ảnh cũng xoá được, nhưng chỉ khi đầu tẩy nằm HẲN bên trong
+    // chúng — dùng mép ngoài sẽ khiến việc tẩy nét vẽ sát cạnh ảnh vô tình
+    // xoá mất cả tấm ảnh.
+    const insideRect = (r: { x: number; y: number; width: number; height: number }) =>
+      x > r.x && x < r.x + r.width && y > r.y && y < r.y + r.height;
+
+    const updatedTexts = page.textElements.filter(t => !insideRect(t));
+    const updatedImages = page.imageElements.filter(i => !insideRect(i));
+
+    const changed =
+      updatedStrokes.length !== page.strokes.length ||
+      updatedTexts.length !== page.textElements.length ||
+      updatedImages.length !== page.imageElements.length;
+
+    if (changed) {
+      // Cùng một lần quét tẩy chỉ tính là MỘT bước hoàn tác
+      onPageUpdate(
+        { ...page, strokes: updatedStrokes, textElements: updatedTexts, imageElements: updatedImages },
+        gestureKeyRef.current
+      );
+    }
+  };
+
+  /** Tìm nét vẽ gần điểm chạm nhất mà có mốc thời gian ghi âm */
+  const findNearestStrokeWithAudio = (x: number, y: number): Stroke | null => {
+    const HIT_RADIUS = 28;
+    let best: Stroke | null = null;
+    let bestDistance = HIT_RADIUS;
+
+    page.strokes.forEach(stroke => {
+      if (stroke.audioTimestamp === undefined) return;
+      stroke.points.forEach(p => {
+        const distance = Math.hypot(p.x - x, p.y - y);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = stroke;
+        }
+      });
     });
 
-    if (updatedStrokes.length !== page.strokes.length) {
-      onPageUpdate({ ...page, strokes: updatedStrokes });
-    }
+    return best;
+  };
+
+  /**
+   * Toạ độ con trỏ trên màn hình -> toạ độ trang giấy.
+   * Dùng tỉ lệ rect thực tế thay vì chia cho zoomLevel để không lệch khi trang
+   * đang được canh giữa hoặc vùng cuộn đang ở vị trí bất kỳ.
+   */
+  const toCanvasPoint = (clientX: number, clientY: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return { x: clientX, y: clientY };
+    return {
+      x: (clientX - rect.left) * (pageWidth / rect.width),
+      y: (clientY - rect.top) * (pageHeight / rect.height)
+    };
+  };
+
+  /** Toạ độ trang giấy -> toạ độ màn hình (cho menu dùng position: fixed) */
+  const toClientPoint = (pageX: number, pageY: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return { x: pageX, y: pageY };
+    return {
+      x: rect.left + pageX * (rect.width / pageWidth),
+      y: rect.top + pageY * (rect.height / pageHeight)
+    };
   };
 
   // Point in polygon test
@@ -554,6 +989,58 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   // Lasso collision
   const isStrokeInPolygon = (stroke: Stroke, poly: { x: number; y: number }[]) => {
     return stroke.points.some(pt => isPointInPolygon(pt, poly));
+  };
+
+  /** Khung chữ / ảnh coi là được chọn khi một góc hoặc tâm nằm trong vùng khoanh */
+  const isRectInPolygon = (
+    rect: { x: number; y: number; width: number; height: number },
+    poly: { x: number; y: number }[]
+  ) => {
+    const probes = [
+      { x: rect.x, y: rect.y },
+      { x: rect.x + rect.width, y: rect.y },
+      { x: rect.x, y: rect.y + rect.height },
+      { x: rect.x + rect.width, y: rect.y + rect.height },
+      { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+    ];
+    return probes.some(p => isPointInPolygon(p, poly));
+  };
+
+  /** Chọn mọi loại đối tượng nằm trong vùng khoanh */
+  const collectSelection = (poly: { x: number; y: number }[]) => ({
+    strokes: page.strokes.filter(s => isStrokeInPolygon(s, poly)),
+    textIds: page.textElements.filter(t => isRectInPolygon(t, poly)).map(t => t.id),
+    imageIds: page.imageElements.filter(i => isRectInPolygon(i, poly)).map(i => i.id)
+  });
+
+  /** Khung bao chung của cả nét vẽ, khung chữ và ảnh đang chọn */
+  const getSelectionBounds = (
+    strokes: Stroke[],
+    textIds: string[],
+    imageIds: string[]
+  ) => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    const include = (x: number, y: number) => {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    };
+
+    strokes.forEach(s => s.points.forEach(p => include(p.x, p.y)));
+    page.textElements
+      .filter(t => textIds.includes(t.id))
+      .forEach(t => { include(t.x, t.y); include(t.x + t.width, t.y + t.height); });
+    page.imageElements
+      .filter(i => imageIds.includes(i.id))
+      .forEach(i => { include(i.x, i.y); include(i.x + i.width, i.y + i.height); });
+
+    if (minX === Infinity) return { x: 0, y: 0, width: 100, height: 40 };
+    return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
   };
 
   // Smart Shape Smooth
@@ -597,18 +1084,39 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   // Open Interactive InkToText Modal upon Lasso action
   const handleConvertToTextModal = async () => {
-    if (selectedStrokes.length === 0) return;
+    if (selectedStrokes.length === 0 || isRecognizingSelection) return;
 
-    const result = await VietnameseInkRecognizer.recognizeStrokesAsync(selectedStrokes);
-    setPendingRecognizedText(result.text || 'Ghi chú');
-    setPendingSuggestions(result.suggestions || []);
-    setPendingStrokesToReplace(result.strokesProcessed);
-    setPendingBbox(result.boundingBox);
+    setIsRecognizingSelection(true);
+    const strokeIds = selectedStrokes.map(s => s.id);
+    const fallbackBbox = VietnameseInkRecognizer.getBoundingBox(selectedStrokes);
+
+    try {
+      const result = await VietnameseInkRecognizer.recognizeSelection(selectedStrokes);
+      setPendingRecognizedText(result.text);
+      setPendingSuggestions(result.suggestions);
+      setPendingStrokesToReplace(result.strokesProcessed);
+      setPendingBbox(result.boundingBox);
+      setPendingError(null);
+    } catch (e: any) {
+      // Không đoán bừa: mở hộp thoại với ô trống và nói rõ vì sao, người dùng
+      // vẫn tự gõ hoặc đọc bằng giọng nói được.
+      setPendingRecognizedText('');
+      setPendingSuggestions(VietnameseInkRecognizer.getUserDictionary());
+      setPendingStrokesToReplace(strokeIds);
+      setPendingBbox(fallbackBbox);
+      setPendingError(
+        e instanceof InkRecognitionError && e.kind === 'offline'
+          ? 'Không có mạng nên chưa nhận diện được nét chữ. Bạn có thể tự nhập hoặc đọc bằng giọng nói.'
+          : e instanceof InkRecognitionError && e.kind === 'empty'
+            ? 'Không đọc được chữ nào từ vùng đã khoanh. Thử khoanh gọn hơn quanh một từ.'
+            : 'Dịch vụ nhận diện không phản hồi. Bạn có thể tự nhập chữ bên dưới.'
+      );
+    } finally {
+      setIsRecognizingSelection(false);
+    }
+
     setInkModalOpen(true);
-
-    setLassoPolygon([]);
-    setSelectedStrokes([]);
-    setLassoMenuPos(null);
+    clearSelection();
   };
 
   // Confirm Ink To Text Conversion from Modal
@@ -638,17 +1146,17 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     setSelectedTextId(newTextElement.id);
   };
 
-  const handleAiSummarize = () => {
-    alert('✨ AI Assistant: Đã tối ưu nét chữ và chuẩn hóa Tiếng Việt thành công!');
-  };
-
   const handleDeleteSelectedStrokes = () => {
-    const selectedIds = selectedStrokes.map(s => s.id);
-    const remaining = page.strokes.filter(s => !selectedIds.includes(s.id));
-    onPageUpdate({ ...page, strokes: remaining });
-    setLassoPolygon([]);
-    setSelectedStrokes([]);
-    setLassoMenuPos(null);
+    const strokeIds = selectedStrokes.map(s => s.id);
+
+    onPageUpdate({
+      ...page,
+      strokes: page.strokes.filter(s => !strokeIds.includes(s.id)),
+      textElements: page.textElements.filter(t => !selectedTextIds.includes(t.id)),
+      imageElements: page.imageElements.filter(i => !selectedImageIds.includes(i.id))
+    });
+
+    clearSelection();
   };
 
   const getTemplateClass = () => {
@@ -667,13 +1175,52 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       ref={containerRef}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      className={`relative w-full h-full overflow-auto select-none touch-none ${getTemplateClass()}`}
+      className={`relative w-full h-full overflow-hidden select-none ${audioSeekMode ? 'cursor-help' : ''}`}
     >
-      {/* Zoom Transform Wrapper */}
-      <div 
-        className="relative w-full h-full min-w-full min-h-full origin-top-left transition-transform duration-75"
-        style={{ transform: `scale(${zoomLevel})` }}
+      {/* Nhắc chế độ chạm nét vẽ để nghe lại — nằm ngoài vùng cuộn nên không trôi */}
+      {audioSeekMode && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/95 text-amber-950 text-xs font-bold shadow-xl animate-pop pointer-events-none">
+          <MousePointerClick className="w-4 h-4" />
+          <span>Chạm vào một nét vẽ để nghe lại đoạn ghi âm lúc viết nét đó</span>
+        </div>
+      )}
+
+      {/* VÙNG CUỘN — thanh cuộn xuất hiện khi trang lớn hơn khung nhìn.
+          touch-action: none để WebView Android không tự cuộn khi bút chạm
+          (bút cảm ứng cũng phát touch event). Việc cuộn do ứng dụng tự xử lý:
+          1 ngón/chuột kéo khi Palm Rejection bật, 2 ngón luôn pan + zoom. */}
+      <div
+        ref={scrollerRef}
+        onScroll={(e) => {
+          scrollPositionRef.current = {
+            left: e.currentTarget.scrollLeft,
+            top: e.currentTarget.scrollTop
+          };
+        }}
+        className="w-full h-full overflow-auto bg-slate-200"
+        style={{ touchAction: 'none' }}
       >
+        {/* Lớp đệm giữ đúng kích thước cuộn theo trang ĐÃ scale */}
+        <div
+          className="relative"
+          style={{
+            width: `${pageWidth * zoomLevel}px`,
+            height: `${pageHeight * zoomLevel}px`,
+            margin: `${SHEET_MARGIN}px auto`
+          }}
+        >
+          {/* TỜ GIẤY — kích thước logic cố định, chỉ scale bằng CSS transform.
+              Không dùng overflow-hidden: thanh công cụ của khung chữ nằm ở
+              -top-12 nên sẽ bị cắt nếu khung chữ ở sát mép trên trang. */}
+          <div
+            className={`absolute top-0 left-0 rounded-sm shadow-[0_12px_44px_rgba(0,0,0,0.55)] ${getTemplateClass()}`}
+            style={{
+              width: `${pageWidth}px`,
+              height: `${pageHeight}px`,
+              transform: `scale(${zoomLevel})`,
+              transformOrigin: 'top left'
+            }}
+          >
         {/* PDF Background */}
         {page.pdfDataUrl && (
           <img
@@ -683,12 +1230,146 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           />
         )}
 
-        {/* Interactive Graphic Canvas Layer */}
+        {/* Image Layer — nằm DƯỚI lớp mực để có thể viết chú thích đè lên ảnh.
+            Ảnh không nhận pointer event nên nét bút vẽ xuyên qua bình thường. */}
+        {page.imageElements.map((img) => (
+          <div
+            key={`img-visual-${img.id}`}
+            className="absolute z-[5] pointer-events-none"
+            style={{
+              left: `${img.x}px`,
+              top: `${img.y}px`,
+              width: `${img.width}px`,
+              height: `${img.height}px`,
+              transform: img.rotation ? `rotate(${img.rotation}deg)` : undefined
+            }}
+          >
+            <img
+              src={img.src}
+              alt="Ảnh ghi chú"
+              draggable={false}
+              className="w-full h-full object-contain rounded-lg shadow-md select-none"
+            />
+          </div>
+        ))}
+
+        {/* LỚP TĨNH — nét mực đã lưu. Không nhận pointer event. */}
+        <canvas
+          ref={staticCanvasRef}
+          className="absolute inset-0 w-full h-full z-10 pointer-events-none"
+        />
+
+        {/* LỚP ĐỘNG — nét đang vẽ + lasso, và là lớp nhận mọi thao tác bút */}
         <canvas
           ref={canvasRef}
           onPointerDown={handlePointerDown}
-          className="absolute inset-0 w-full h-full z-10 cursor-crosshair touch-none"
+          className={`absolute inset-0 w-full h-full z-[11] touch-none ${
+            palmRejectionActive ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'
+          }`}
         />
+
+        {/* Image Control Layer — chỉ các tay cầm nhận chạm, phần còn lại xuyên suốt */}
+        {page.imageElements.map((img) => {
+          const isSelected = selectedImageId === img.id;
+
+          const updateImage = (patch: Partial<ImageElement>, coalesceKey?: string) => {
+            const updated = page.imageElements.map(i => (i.id === img.id ? { ...i, ...patch } : i));
+            onPageUpdate({ ...page, imageElements: updated }, coalesceKey);
+          };
+
+          return (
+            <div
+              key={`img-ctrl-${img.id}`}
+              className="absolute z-30 pointer-events-none"
+              style={{
+                left: `${img.x}px`,
+                top: `${img.y}px`,
+                width: `${img.width}px`,
+                height: `${img.height}px`
+              }}
+            >
+              {/* Viền chọn: nét liền khi chọn trực tiếp, nét đứt khi lasso quét trúng */}
+              {isSelected ? (
+                <div className="absolute inset-0 ring-2 ring-indigo-500 rounded-lg pointer-events-none" />
+              ) : selectedImageIds.includes(img.id) ? (
+                <div className="absolute inset-0 ring-2 ring-indigo-500 ring-dashed bg-indigo-500/10 rounded-lg pointer-events-none" />
+              ) : null}
+
+              {/* Tay cầm kéo di chuyển (luôn hiện để tìm được ảnh dưới lớp mực) */}
+              <div
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  const local = toCanvasPoint(e.clientX, e.clientY);
+                  beginGesture('image-move');
+                  setSelectedImageId(img.id);
+                  setSelectedTextId(null);
+                  setIsDraggingImage(true);
+                  setImageDragOffset({ x: local.x - img.x, y: local.y - img.y });
+                }}
+                className={`absolute -top-3 -left-3 w-7 h-7 rounded-full flex items-center justify-center cursor-grab active:cursor-grabbing pointer-events-auto shadow-lg border-2 border-white transition ${
+                  isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-800/80 text-indigo-300 hover:bg-indigo-600 hover:text-white'
+                }`}
+                title="Giữ và kéo để di chuyển ảnh"
+              >
+                <Grip className="w-3.5 h-3.5" />
+              </div>
+
+              {isSelected && (
+                <>
+                  {/* Thanh công cụ ảnh */}
+                  <div className="chrome-bar chrome-bar-float absolute -top-12 left-6 px-1.5 py-1 rounded-xl flex items-center gap-0.5 pointer-events-auto border animate-pop">
+                    <button
+                      onClick={() => updateImage({ rotation: ((img.rotation || 0) - 90 + 360) % 360 }, `rotate-${img.id}`)}
+                      className="chrome-btn w-7 h-7"
+                      title="Xoay trái 90°"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-[11px] font-bold text-slate-600 px-1 tabular-nums">
+                      {Math.round(img.rotation || 0)}°
+                    </span>
+                    <button
+                      onClick={() => updateImage({ rotation: ((img.rotation || 0) + 90) % 360 }, `rotate-${img.id}`)}
+                      className="chrome-btn w-7 h-7"
+                      title="Xoay phải 90°"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+
+                    <div className="h-4 w-px bg-slate-200 mx-0.5" />
+
+                    <button
+                      onClick={() => {
+                        const updated = page.imageElements.filter(i => i.id !== img.id);
+                        onPageUpdate({ ...page, imageElements: updated });
+                        setSelectedImageId(null);
+                      }}
+                      className="chrome-btn w-7 h-7 hover:bg-rose-50 hover:text-rose-600"
+                      title="Xoá ảnh này"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Tay cầm resize (giữ tỉ lệ) */}
+                  <div
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      const local = toCanvasPoint(e.clientX, e.clientY);
+                      beginGesture('image-resize');
+                      setIsResizingImage(true);
+                      setImageResizeStart({ x: local.x, y: local.y, w: img.width, h: img.height });
+                    }}
+                    className="absolute -bottom-2.5 -right-2.5 w-6 h-6 rounded-full bg-indigo-600 text-white border-2 border-white flex items-center justify-center cursor-nwse-resize shadow-lg pointer-events-auto hover:scale-125 transition"
+                    title="Kéo để thay đổi kích thước ảnh"
+                  >
+                    <Maximize2 className="w-3 h-3" />
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
 
         {/* Render Text Elements */}
         {page.textElements.map((txt) => {
@@ -700,11 +1381,16 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
               onClick={(e) => {
                 e.stopPropagation();
                 setSelectedTextId(txt.id);
+                setSelectedImageId(null);
               }}
               className={`absolute z-20 transition-all rounded-2xl ${
-                isSelected 
-                  ? 'ring-2 ring-indigo-500 shadow-2xl bg-white/95 backdrop-blur-md p-3 border border-indigo-300' 
-                  : 'hover:ring-1 hover:ring-slate-400/50 p-2'
+                inkInputTargetId === txt.id
+                  ? 'ring-2 ring-amber-400 shadow-2xl bg-white/95 backdrop-blur-md p-3 border border-amber-300'
+                  : isSelected
+                    ? 'ring-2 ring-indigo-500 shadow-2xl bg-white/95 backdrop-blur-md p-3 border border-indigo-300'
+                    : selectedTextIds.includes(txt.id)
+                      ? 'ring-2 ring-indigo-500 ring-dashed bg-indigo-500/10 p-2'
+                      : 'hover:ring-1 hover:ring-slate-400/50 p-2'
               }`}
               style={{
                 left: `${txt.x}px`,
@@ -715,46 +1401,66 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
             >
               {/* Active Floating Text Toolbar */}
               {isSelected && (
-                <div className="absolute -top-12 left-0 right-0 glass-toolbar px-3 py-1.5 rounded-xl flex items-center justify-between gap-2 z-30 shadow-xl border border-slate-700 animate-pop">
+                <div className="chrome-bar chrome-bar-float absolute -top-12 left-0 right-0 px-2 py-1 rounded-xl flex items-center justify-between gap-2 z-30 border animate-pop">
                   {/* Drag Handle */}
                   <div
                     onPointerDown={(e) => {
                       e.stopPropagation();
+                      // Quy đổi về toạ độ canvas để khung chữ không bị nhảy khi zoom
+                      const local = toCanvasPoint(e.clientX, e.clientY);
+                      beginGesture('text-move');
+                      setSelectedTextId(txt.id);
                       setIsDraggingText(true);
-                      setDragOffset({ x: e.clientX - txt.x, y: e.clientY - txt.y });
+                      setDragOffset({ x: local.x - txt.x, y: local.y - txt.y });
                     }}
-                    className="flex items-center gap-1 cursor-grab active:cursor-grabbing text-indigo-400 hover:text-indigo-300 font-bold text-xs"
+                    className="flex items-center gap-1 px-1.5 cursor-grab active:cursor-grabbing text-indigo-600 hover:text-indigo-800 font-bold text-[11px]"
                     title="Giữ và kéo để di chuyển khung chữ"
                   >
                     <Grip className="w-4 h-4" />
-                    <span>Kéo di chuyển</span>
+                    <span className="hidden sm:inline">Kéo</span>
                   </div>
 
                   {/* Font Size & Actions */}
                   <div className="flex items-center gap-1">
+                    {/* Bật bảng viết tay điền chữ cho khung này */}
+                    <button
+                      onClick={() => onRequestInkInput(txt.id)}
+                      className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-bold border transition ${
+                        inkInputTargetId === txt.id
+                          ? 'bg-amber-500 text-white border-amber-400'
+                          : 'bg-white text-indigo-700 border-slate-200 hover:bg-indigo-600 hover:text-white hover:border-indigo-600'
+                      }`}
+                      title="Viết tay bên ngoài để tự động điền chữ Tiếng Việt vào khung này"
+                    >
+                      <PenLine className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Viết tay</span>
+                    </button>
+
+                    <div className="h-4 w-px bg-slate-200 mx-0.5" />
+
                     <button
                       onClick={() => {
                         const updated = page.textElements.map(t => t.id === txt.id ? { ...t, fontSize: Math.max(14, t.fontSize - 2) } : t);
-                        onPageUpdate({ ...page, textElements: updated });
+                        onPageUpdate({ ...page, textElements: updated }, `font-${txt.id}`);
                       }}
-                      className="p-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      className="chrome-btn w-7 h-7"
                       title="Thu nhỏ font"
                     >
                       <Minus className="w-3.5 h-3.5" />
                     </button>
-                    <span className="text-xs font-bold text-slate-200 px-1">{txt.fontSize}px</span>
+                    <span className="text-[11px] font-bold text-slate-600 px-0.5 tabular-nums">{txt.fontSize}</span>
                     <button
                       onClick={() => {
                         const updated = page.textElements.map(t => t.id === txt.id ? { ...t, fontSize: Math.min(72, t.fontSize + 2) } : t);
-                        onPageUpdate({ ...page, textElements: updated });
+                        onPageUpdate({ ...page, textElements: updated }, `font-${txt.id}`);
                       }}
-                      className="p-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      className="chrome-btn w-7 h-7"
                       title="Phóng to font"
                     >
                       <Plus className="w-3.5 h-3.5" />
                     </button>
 
-                    <div className="h-4 w-px bg-slate-700 mx-1" />
+                    <div className="h-4 w-px bg-slate-200 mx-0.5" />
 
                     {/* Delete Text Element */}
                     <button
@@ -763,8 +1469,8 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
                         onPageUpdate({ ...page, textElements: updated });
                         setSelectedTextId(null);
                       }}
-                      className="p-1 rounded bg-rose-600/80 text-white hover:bg-rose-600"
-                      title="Xóa khung chữ này"
+                      className="chrome-btn w-7 h-7 hover:bg-rose-50 hover:text-rose-600"
+                      title="Xoá khung chữ này"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -777,7 +1483,8 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
                 value={txt.text}
                 onChange={(e) => {
                   const updated = page.textElements.map(t => t.id === txt.id ? { ...t, text: e.target.value } : t);
-                  onPageUpdate({ ...page, textElements: updated });
+                  // Gõ liên tục trong cùng khung chữ chỉ tạo 1 bước hoàn tác
+                  onPageUpdate({ ...page, textElements: updated }, `text-edit-${txt.id}`);
                 }}
                 className="bg-transparent border-none outline-none resize-none w-full h-full leading-snug font-medium text-[#1F2937]"
                 style={{
@@ -792,8 +1499,10 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
                 <div
                   onPointerDown={(e) => {
                     e.stopPropagation();
+                    const local = toCanvasPoint(e.clientX, e.clientY);
+                    beginGesture('text-resize');
                     setIsResizingText(true);
-                    setResizeStart({ x: e.clientX, y: e.clientY, w: txt.width, h: txt.height, font: txt.fontSize });
+                    setResizeStart({ x: local.x, y: local.y, w: txt.width, h: txt.height, font: txt.fontSize });
                   }}
                   className="absolute -bottom-2 -right-2 w-6 h-6 rounded-full bg-indigo-600 text-white border-2 border-white flex items-center justify-center cursor-nwse-resize shadow-lg z-30 transform hover:scale-125 transition"
                   title="Kéo góc này để phóng to / thu nhỏ khung chữ"
@@ -804,6 +1513,8 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
             </div>
           );
         })}
+          </div>
+        </div>
       </div>
 
       {/* Lasso Context Action Menu */}
@@ -812,14 +1523,11 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           x={lassoMenuPos.x}
           y={lassoMenuPos.y}
           onConvertToText={handleConvertToTextModal}
-          onAiSummarize={handleAiSummarize}
+          isRecognizing={isRecognizingSelection}
+          canRecognize={selectedStrokes.length > 0}
           onDeleteStrokes={handleDeleteSelectedStrokes}
           onScaleSelected={handleScaleSelectedStrokes}
-          onClose={() => {
-            setLassoPolygon([]);
-            setSelectedStrokes([]);
-            setLassoMenuPos(null);
-          }}
+          onClose={clearSelection}
         />
       )}
 
@@ -828,6 +1536,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         isOpen={inkModalOpen}
         initialText={pendingRecognizedText}
         suggestions={pendingSuggestions}
+        errorMessage={pendingError}
         fontFamily={fontFamily}
         onConfirm={handleConfirmInkModal}
         onClose={() => setInkModalOpen(false)}

@@ -1,19 +1,21 @@
-import React, { useState } from 'react';
-import { 
-  PenTool, 
-  Highlighter, 
-  Eraser, 
-  Lasso, 
-  Sparkles, 
-  Type, 
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  PenTool,
+  Highlighter,
+  Eraser,
+  Lasso,
+  Type,
   Shapes,
-  Palette,
-  Sliders,
   ChevronDown,
-  ChevronUp,
   Check,
-  Eye,
-  EyeOff
+  PanelTopClose,
+  PanelTopOpen,
+  ShieldCheck,
+  ZoomIn,
+  ZoomOut,
+  StretchHorizontal,
+  Scan,
+  MousePointer2
 } from 'lucide-react';
 import { ToolType, VIETNAMESE_HANDWRITING_FONTS } from '../types/notebook';
 
@@ -28,25 +30,48 @@ interface ToolbarProps {
   onChangeFontFamily: (font: string) => void;
   smartShapeEnabled: boolean;
   onToggleSmartShape: () => void;
+  // Điều khiển khung nhìn (chuyển từ header sang đây cho đúng nhóm chức năng)
+  palmRejectionActive: boolean;
+  onTogglePalmRejection: () => void;
+  zoomLevel: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onResetZoom: () => void;
+  onFitWidth: () => void;
+  onFitPage: () => void;
 }
 
 const COLOR_SWATCHES = [
-  { name: 'Đen Mực', hex: '#000000' },
-  { name: 'Xanh Indigo', hex: '#6366f1' },
+  { name: 'Đen Mực', hex: '#1e293b' },
+  { name: 'Xanh Indigo', hex: '#4f46e5' },
   { name: 'Xanh Dương', hex: '#2563eb' },
-  { name: 'Xanh Lá Emerald', hex: '#059669' },
-  { name: 'Đỏ Hồng Crimson', hex: '#e11d48' },
+  { name: 'Xanh Lá', hex: '#059669' },
+  { name: 'Đỏ Hồng', hex: '#e11d48' },
   { name: 'Cam Amber', hex: '#d97706' },
   { name: 'Tím Violet', hex: '#9333ea' },
   { name: 'Trắng Neon', hex: '#ffffff' }
 ];
 
 const PEN_SIZES = [
-  { label: '0.3mm', val: 2 },
-  { label: '0.5mm', val: 4 },
-  { label: '0.8mm', val: 8 },
-  { label: '1.2mm', val: 14 },
-  { label: '2.0mm', val: 24 }
+  { label: '0.3', val: 2 },
+  { label: '0.5', val: 4 },
+  { label: '0.8', val: 8 },
+  { label: '1.2', val: 14 },
+  { label: '2.0', val: 24 }
+];
+
+const ERASER_SIZES = [
+  { label: 'Nhỏ', val: 6 },
+  { label: 'Vừa', val: 14 },
+  { label: 'Lớn', val: 26 }
+];
+
+const TOOLS: { id: ToolType; icon: React.ElementType; title: string }[] = [
+  { id: 'pen', icon: PenTool, title: 'Bút mực — cảm ứng lực Xiaomi Pen' },
+  { id: 'highlighter', icon: Highlighter, title: 'Bút dạ quang tô chữ' },
+  { id: 'eraser-stroke', icon: Eraser, title: 'Cục tẩy nét' },
+  { id: 'lasso', icon: Lasso, title: 'Khoanh vùng — nhận diện chữ, di chuyển, phóng to' },
+  { id: 'text', icon: Type, title: 'Chèn khung chữ' }
 ];
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -59,177 +84,252 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   fontFamily,
   onChangeFontFamily,
   smartShapeEnabled,
-  onToggleSmartShape
+  onToggleSmartShape,
+  palmRejectionActive,
+  onTogglePalmRejection,
+  zoomLevel,
+  onZoomIn,
+  onZoomOut,
+  onResetZoom,
+  onFitWidth,
+  onFitPage
 }) => {
   const [showFontPicker, setShowFontPicker] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const fontPickerRef = useRef<HTMLDivElement | null>(null);
+
+  // Bấm ra ngoài để đóng danh sách font
+  useEffect(() => {
+    if (!showFontPicker) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!fontPickerRef.current?.contains(event.target as Node)) setShowFontPicker(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showFontPicker]);
+
+  // Chỉ hiện tuỳ chọn liên quan tới công cụ đang chọn — đây là điểm chính giúp
+  // thanh công cụ không còn tràn xuống nhiều dòng như trước.
+  const showColors = currentTool === 'pen' || currentTool === 'highlighter' || currentTool === 'text';
+  const showPenSizes = currentTool === 'pen' || currentTool === 'highlighter';
+  const showEraserSizes = currentTool === 'eraser-stroke';
+  const showSmartShape = currentTool === 'pen' || currentTool === 'highlighter';
+  const showFonts = currentTool === 'text';
 
   if (isCollapsed) {
     return (
-      <div className="absolute top-18 right-4 z-40 animate-pop">
+      <div className="absolute top-16 right-4 z-40 animate-pop">
         <button
           onClick={() => setIsCollapsed(false)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass-panel text-indigo-400 hover:text-white font-bold text-xs shadow-xl border border-indigo-500/40 hover:bg-indigo-600 transition"
-          title="Hiện thanh công cụ vẽ"
+          className="chrome-bar chrome-bar-float flex items-center gap-1.5 px-3 py-2 rounded-xl border text-slate-700 hover:text-indigo-700 font-bold text-xs transition"
+          title="Hiện lại thanh công cụ"
         >
-          <Eye className="w-4 h-4" />
-          <span>Hiện Thanh Công Cụ</span>
+          <PanelTopOpen className="w-4 h-4 text-indigo-600" />
+          <span>Thanh công cụ</span>
         </button>
       </div>
     );
   }
 
   return (
-    <div className="w-full glass-toolbar px-4 py-2 flex flex-wrap items-center justify-between gap-3 z-30 border-b border-slate-700/60 shadow-lg relative transition-all">
-      {/* 1. GoodNotes Main Tool Selector */}
-      <div className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-2xl border border-slate-800 shadow-inner">
-        {/* Fountain Pen */}
-        <button
-          onClick={() => onSelectTool('pen')}
-          className={`tool-btn ${currentTool === 'pen' ? 'active' : ''}`}
-          title="Bút Mực (Fountain Pen - Cảm ứng lực Xiaomi Pen)"
-        >
-          <PenTool className="w-5 h-5" />
-        </button>
-
-        {/* Highlighter */}
-        <button
-          onClick={() => onSelectTool('highlighter')}
-          className={`tool-btn ${currentTool === 'highlighter' ? 'active' : ''}`}
-          title="Bút Dạ Quang Tô Chữ (Highlighter)"
-        >
-          <Highlighter className="w-5 h-5" />
-        </button>
-
-        {/* Eraser */}
-        <button
-          onClick={() => onSelectTool('eraser-stroke')}
-          className={`tool-btn ${currentTool === 'eraser-stroke' ? 'active' : ''}`}
-          title="Cục Tẩy Nét (Stroke Eraser)"
-        >
-          <Eraser className="w-5 h-5" />
-        </button>
-
-        {/* Lasso Tool */}
-        <button
-          onClick={() => onSelectTool('lasso')}
-          className={`tool-btn ${currentTool === 'lasso' ? 'active' : ''}`}
-          title="Lasso Khoanh Vùng AI Nhận Diện Chữ Viết Tay"
-        >
-          <Lasso className="w-5 h-5 text-indigo-400" />
-        </button>
-
-        {/* Text Input */}
-        <button
-          onClick={() => onSelectTool('text')}
-          className={`tool-btn ${currentTool === 'text' ? 'active' : ''}`}
-          title="Chèn Khung Text Font Chữ Đẹp"
-        >
-          <Type className="w-5 h-5" />
-        </button>
-      </div>
-
-      {/* 2. Smart Features (Auto-Shape & AI Ink-to-Text) */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={onToggleSmartShape}
-          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition border ${
-            smartShapeEnabled
-              ? 'bg-purple-600/30 text-purple-200 border-purple-500/50 shadow-md shadow-purple-500/20'
-              : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:text-slate-200'
-          }`}
-          title="Tự động nắn thẳng nét vẽ hình học khi giữ nguyên bút 0.5s"
-        >
-          <Shapes className={`w-4 h-4 ${smartShapeEnabled ? 'text-purple-400 animate-pulse' : ''}`} />
-          <span className="hidden sm:inline">Smart Auto-Shape</span>
-        </button>
-      </div>
-
-      {/* 3. Preset Color Palette Swatches */}
-      <div className="flex items-center gap-1.5 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800">
-        <Palette className="w-4 h-4 text-slate-400 ml-1 hidden lg:block" />
-        {COLOR_SWATCHES.map((swatch) => (
+    <div className="chrome-bar chrome-bar-top w-full border-b px-3 py-2 flex items-center gap-3 z-30 shrink-0 relative">
+      {/* ---------- 1. Công cụ vẽ ---------- */}
+      <div className="chrome-group flex items-center gap-0.5 p-1 shrink-0">
+        {TOOLS.map(({ id, icon: Icon, title }) => (
           <button
-            key={swatch.hex}
-            onClick={() => onChangeColor(swatch.hex)}
-            className={`w-6 h-6 rounded-full border-2 transition transform hover:scale-110 flex items-center justify-center ${
-              color === swatch.hex ? 'border-white scale-110 shadow-md shadow-indigo-500/60 ring-2 ring-indigo-500/40' : 'border-transparent opacity-85'
-            }`}
-            style={{ backgroundColor: swatch.hex }}
-            title={swatch.name}
+            key={id}
+            onClick={() => onSelectTool(id)}
+            className={`tool-btn ${currentTool === id ? 'active' : ''}`}
+            title={title}
           >
-            {color === swatch.hex && <Check className={`w-3.5 h-3.5 ${swatch.hex === '#ffffff' ? 'text-slate-900' : 'text-white'}`} />}
+            <Icon className="w-[19px] h-[19px]" />
           </button>
         ))}
       </div>
 
-      {/* 4. GoodNotes Pen Thickness Selector */}
-      <div className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-2xl border border-slate-800">
-        <Sliders className="w-4 h-4 text-slate-400 ml-1.5 hidden md:block" />
-        {PEN_SIZES.map((s) => (
-          <button
-            key={s.val}
-            onClick={() => onChangeSize(s.val)}
-            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition ${
-              size === s.val
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      {/* 5. Vietnamese Font Family Selector & Hide Toolbar Button */}
-      <div className="flex items-center gap-2">
-        <div className="relative">
-          <button
-            onClick={() => setShowFontPicker(!showFontPicker)}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800/90 text-slate-200 border border-slate-700 text-xs font-semibold hover:bg-slate-700 transition"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span className="truncate max-w-[110px]">
-              {VIETNAMESE_HANDWRITING_FONTS.find(f => f.family === fontFamily)?.name.split(' ')[0] || 'Font'}
-            </span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-          </button>
-
-          {showFontPicker && (
-            <div className="absolute top-12 right-0 w-72 glass-panel rounded-2xl p-2 z-40 border border-slate-700 shadow-2xl animate-pop">
-              <div className="text-xs font-bold text-slate-400 px-3 py-1.5 border-b border-slate-800">
-                Font Viết Tay Tiếng Việt AI (GoodNotes Style)
-              </div>
-              <div className="mt-1 space-y-1">
-                {VIETNAMESE_HANDWRITING_FONTS.map((font) => (
-                  <button
-                    key={font.family}
-                    onClick={() => {
-                      onChangeFontFamily(font.family);
-                      setShowFontPicker(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 rounded-xl transition flex flex-col ${
-                      fontFamily === font.family ? 'bg-indigo-600/40 text-indigo-200 border border-indigo-500/50' : 'hover:bg-slate-800 text-slate-300'
+      {/* ---------- 2. Tuỳ chọn theo công cụ đang chọn ---------- */}
+      <div className="flex-1 min-w-0 flex items-center gap-2.5 overflow-x-auto">
+        {showColors && (
+          <div className="chrome-group flex items-center gap-1 px-2 py-1.5 shrink-0">
+            {COLOR_SWATCHES.map(swatch => (
+              <button
+                key={swatch.hex}
+                onClick={() => onChangeColor(swatch.hex)}
+                className={`w-6 h-6 rounded-full flex items-center justify-center transition transform hover:scale-110 ${
+                  color === swatch.hex
+                    ? 'ring-2 ring-indigo-600 ring-offset-2 ring-offset-slate-50 scale-105'
+                    : 'ring-1 ring-slate-300'
+                }`}
+                style={{ backgroundColor: swatch.hex }}
+                title={swatch.name}
+              >
+                {color === swatch.hex && (
+                  <Check
+                    className={`w-3.5 h-3.5 ${
+                      swatch.hex === '#ffffff' ? 'text-slate-900' : 'text-white'
                     }`}
-                  >
-                    <span className="text-xs font-bold">{font.name}</span>
-                    <span className="text-base truncate opacity-90 mt-0.5" style={{ fontFamily: font.family }}>
-                      {font.previewText}
-                    </span>
-                  </button>
-                ))}
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {showPenSizes && (
+          <div className="chrome-group flex items-center gap-0.5 p-1 shrink-0">
+            {PEN_SIZES.map(penSize => (
+              <button
+                key={penSize.val}
+                onClick={() => onChangeSize(penSize.val)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition ${
+                  size === penSize.val
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+                title={`Nét ${penSize.label}mm`}
+              >
+                {penSize.label}
+              </button>
+            ))}
+            <span className="text-[10px] font-semibold text-slate-400 pl-1 pr-1.5">mm</span>
+          </div>
+        )}
+
+        {showEraserSizes && (
+          <div className="chrome-group flex items-center gap-0.5 p-1 shrink-0">
+            {ERASER_SIZES.map(eraserSize => (
+              <button
+                key={eraserSize.val}
+                onClick={() => onChangeSize(eraserSize.val)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  size === eraserSize.val
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                {eraserSize.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {showSmartShape && (
+          <button
+            onClick={onToggleSmartShape}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition shrink-0 ${
+              smartShapeEnabled
+                ? 'bg-purple-50 text-purple-700 border-purple-300'
+                : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'
+            }`}
+            title="Giữ nguyên bút 0.5s để tự nắn thẳng nét hình học"
+          >
+            <Shapes className={`w-4 h-4 ${smartShapeEnabled ? 'text-purple-600' : 'text-slate-400'}`} />
+            <span className="hidden lg:inline">Nắn hình</span>
+          </button>
+        )}
+
+        {showFonts && (
+          <div className="relative shrink-0" ref={fontPickerRef}>
+            <button
+              onClick={() => setShowFontPicker(!showFontPicker)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white text-slate-700 border border-slate-200 text-xs font-bold hover:border-indigo-300 hover:text-indigo-700 transition"
+            >
+              <span className="truncate max-w-[120px]" style={{ fontFamily }}>
+                {VIETNAMESE_HANDWRITING_FONTS.find(f => f.family === fontFamily)?.name.split(' (')[0] || 'Font'}
+              </span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            </button>
+
+            {showFontPicker && (
+              <div className="chrome-bar chrome-bar-float absolute top-12 left-0 w-72 rounded-2xl p-1.5 z-40 border animate-pop">
+                <div className="text-[11px] font-bold text-slate-500 px-2.5 py-1.5">
+                  Font chữ viết tay Tiếng Việt
+                </div>
+                <div className="space-y-0.5">
+                  {VIETNAMESE_HANDWRITING_FONTS.map(font => (
+                    <button
+                      key={font.family}
+                      onClick={() => {
+                        onChangeFontFamily(font.family);
+                        setShowFontPicker(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-2 rounded-xl transition flex flex-col ${
+                        fontFamily === font.family
+                          ? 'bg-indigo-50 text-indigo-800 ring-1 ring-indigo-200'
+                          : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <span className="text-[11px] font-bold text-slate-500">{font.name.split(' (')[0]}</span>
+                      <span className="text-lg truncate leading-tight" style={{ fontFamily: font.family }}>
+                        {font.previewText}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+        )}
+
+        {currentTool === 'lasso' && (
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium shrink-0">
+            <MousePointer2 className="w-3.5 h-3.5 text-indigo-500" />
+            <span className="hidden sm:inline">Khoanh vùng nét chữ để nhận diện, di chuyển hoặc phóng to</span>
+          </div>
+        )}
+      </div>
+
+      {/* ---------- 3. Khung nhìn ---------- */}
+      <div className="flex items-center gap-2 shrink-0">
+        {/* Chống tì tay */}
+        <button
+          onClick={onTogglePalmRejection}
+          className={`flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold border transition ${
+            palmRejectionActive
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+              : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'
+          }`}
+          title={
+            palmRejectionActive
+              ? 'Chỉ bút stylus vẽ được — ngón tay và chuột dùng để kéo cuộn trang'
+              : 'Ngón tay và chuột cũng vẽ được'
+          }
+        >
+          <ShieldCheck className={`w-4 h-4 ${palmRejectionActive ? 'text-emerald-600' : 'text-slate-400'}`} />
+          <span className="hidden xl:inline">{palmRejectionActive ? 'Chỉ bút' : 'Tay + bút'}</span>
+        </button>
+
+        {/* Zoom & canh trang */}
+        <div className="chrome-group flex items-center p-1">
+          <button onClick={onZoomOut} className="chrome-btn w-8 h-8" title="Thu nhỏ">
+            <ZoomOut className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onResetZoom}
+            className="px-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 tabular-nums transition"
+            title="Về tỉ lệ 100%"
+          >
+            {Math.round(zoomLevel * 100)}%
+          </button>
+          <button onClick={onZoomIn} className="chrome-btn w-8 h-8" title="Phóng to">
+            <ZoomIn className="w-3.5 h-3.5" />
+          </button>
+          <div className="w-px h-4 bg-slate-200 mx-0.5" />
+          <button onClick={onFitWidth} className="chrome-btn w-8 h-8" title="Vừa chiều ngang trang">
+            <StretchHorizontal className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={onFitPage} className="chrome-btn w-8 h-8" title="Vừa toàn bộ trang">
+            <Scan className="w-3.5 h-3.5" />
+          </button>
         </div>
 
-        {/* Collapse Toolbar Toggle Button */}
+        {/* Thu gọn thanh công cụ */}
         <button
           onClick={() => setIsCollapsed(true)}
-          className="p-2 rounded-xl bg-slate-800/90 text-slate-400 hover:text-white border border-slate-700 transition"
+          className="chrome-btn w-9 h-9 border border-slate-200"
           title="Thu gọn thanh công cụ để tăng diện tích ghi chú"
         >
-          <EyeOff className="w-4 h-4" />
+          <PanelTopClose className="w-4 h-4" />
         </button>
       </div>
     </div>

@@ -1,30 +1,82 @@
 import { Stroke, Point } from '../types/notebook';
 
-export interface InkRecognitionResult {
+export interface SelectionRecognitionResult {
   text: string;
-  confidence: number;
-  boundingBox: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
+  boundingBox: { x: number; y: number; width: number; height: number };
+  /** Các phương án khác + từ điển người dùng, dùng cho chip gợi ý */
   suggestions: string[];
   strokesProcessed: string[];
 }
 
+/** Một nét trên bảng viết tay, toạ độ thô trong hệ toạ độ của bảng */
+export interface RawInkStroke {
+  points: { x: number; y: number; time: number }[];
+}
+
+export interface LineRecognitionResult {
+  /** Phương án tốt nhất cho cả dòng */
+  text: string;
+  /** Các phương án khác, dùng dựng chip gợi ý */
+  candidates: string[];
+}
+
+export class InkRecognitionError extends Error {
+  constructor(message: string, public readonly kind: 'offline' | 'network' | 'empty') {
+    super(message);
+    this.name = 'InkRecognitionError';
+  }
+}
+
+const INPUT_TOOLS_ENDPOINT =
+  'https://www.google.com/inputtools/request?ime=handwriting&app=mobilesearch&cs=1&oe=UTF-8';
+
 /**
- * Dual-Engine Vietnamese Digital Ink Recognition System:
- * 1. Online Google Digital Ink Recognition Web API ('vi') with Stroke Normalization.
- * 2. Native Android Google ML Kit Kotlin Module on Android devices.
- * 3. Offline Heuristic Lexicon Fallback when offline.
+ * Nhận diện chữ viết tay Tiếng Việt qua Google Input Tools ('vi').
+ *
+ * CHỈ CÓ MỘT ĐƯỜNG NHẬN DIỆN DUY NHẤT và nó cần mạng.
+ * Bộ đoán offline theo heuristic của bản trước đã bị xoá: nó trả về từ lấy từ
+ * một từ điển cứng ('Thái', 'Ghi chú'…) bất kể người dùng viết gì, tức là điền
+ * chữ bịa vào ghi chú. Báo lỗi rõ ràng tốt hơn đoán sai trong im lặng.
  */
 export class VietnameseInkRecognizer {
-  private static userDictionary: string[] = [
-    'Thái', 'Ghi chú', 'Học tập', 'Công việc', 'Kế hoạch',
+  private static readonly DICTIONARY_KEY = 'padnote_user_dictionary';
+
+  private static readonly SEED_DICTIONARY: string[] = [
+    'Ghi chú', 'Học tập', 'Công việc', 'Kế hoạch',
     'PadNote AI', 'Xiaomi Pad', 'Sổ tay số', 'Ý tưởng', 'Bài giảng', 'Dự án',
     'Việt Nam', 'Thiết kế', 'Xin chào', 'Thành công', 'Họp team', 'Lập trình'
   ];
+
+  /**
+   * Từ điển riêng của người dùng, giữ trong localStorage.
+   * Bản trước chỉ để trong RAM nên mọi từ tự thêm đều mất sau khi tải lại app.
+   * Dữ liệu chỉ là một mảng chuỗi ngắn nên localStorage là đủ, không cần
+   * IndexedDB và không phải chờ bất đồng bộ lúc khởi động.
+   */
+  private static userDictionary: string[] = (() => {
+    try {
+      const stored = localStorage.getItem('padnote_user_dictionary');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed.filter(w => typeof w === 'string');
+      }
+    } catch {
+      /* dùng danh sách mặc định */
+    }
+    return [
+      'Ghi chú', 'Học tập', 'Công việc', 'Kế hoạch',
+      'PadNote AI', 'Xiaomi Pad', 'Sổ tay số', 'Ý tưởng', 'Bài giảng', 'Dự án',
+      'Việt Nam', 'Thiết kế', 'Xin chào', 'Thành công', 'Họp team', 'Lập trình'
+    ];
+  })();
+
+  private static persistDictionary(): void {
+    try {
+      localStorage.setItem(this.DICTIONARY_KEY, JSON.stringify(this.userDictionary.slice(0, 200)));
+    } catch (e) {
+      console.warn('Không lưu được từ điển người dùng:', e);
+    }
+  }
 
   public static getBoundingBox(strokes: Stroke[]) {
     if (strokes.length === 0) {
@@ -55,9 +107,17 @@ export class VietnameseInkRecognizer {
   }
 
   public static addWordToDictionary(word: string) {
-    if (word && !this.userDictionary.includes(word)) {
-      this.userDictionary.unshift(word);
-    }
+    const trimmed = word?.trim();
+    if (!trimmed || this.userDictionary.includes(trimmed)) return;
+    this.userDictionary.unshift(trimmed);
+    this.persistDictionary();
+  }
+
+  public static removeWordFromDictionary(word: string) {
+    const next = this.userDictionary.filter(w => w !== word);
+    if (next.length === this.userDictionary.length) return;
+    this.userDictionary = next;
+    this.persistDictionary();
   }
 
   public static getUserDictionary(): string[] {
@@ -65,150 +125,139 @@ export class VietnameseInkRecognizer {
   }
 
   /**
-   * Async Recognition Engine using Google Digital Ink Web API ('vi' language tag)
-   * Includes Stroke Geometry Normalization for maximum handwriting precision
+   * Nhận diện MỘT DÒNG chữ viết tay trên bảng nhập (chế độ thời gian thực).
+   *
+   * Khác cách gửi của bản trước ở ba điểm quan trọng:
+   * 1. Gửi toạ độ THÔ kèm `writing_guide` bằng đúng kích thước vùng viết thật.
+   *    Endpoint dùng writing_guide để suy ra chiều cao chữ, nên co giãn nét về
+   *    một khung cố định 800×600 như hàm cũ làm giảm độ chính xác dấu.
+   * 2. Hỗ trợ AbortSignal — trong vòng lặp thời gian thực, request cũ về muộn
+   *    sẽ ghi đè kết quả mới nếu không huỷ.
+   * 3. KHÔNG có fallback heuristic. Bộ đoán offline chỉ trả về từ trong từ điển
+   *    cứng nên trong vòng lặp này nó sẽ điền chữ bừa vào ghi chú của người
+   *    dùng — thà báo lỗi còn hơn.
    */
-  public static async recognizeStrokesAsync(strokes: Stroke[]): Promise<InkRecognitionResult> {
+  public static async recognizeLine(
+    strokes: RawInkStroke[],
+    guideWidth: number,
+    guideHeight: number,
+    signal?: AbortSignal
+  ): Promise<LineRecognitionResult> {
     if (strokes.length === 0) {
-      return this.recognizeStrokesSync(strokes);
+      throw new InkRecognitionError('Chưa có nét nào để nhận diện', 'empty');
     }
 
-    const bbox = this.getBoundingBox(strokes);
-    const strokeIds = strokes.map(s => s.id);
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      throw new InkRecognitionError('Thiết bị đang offline', 'offline');
+    }
 
-    try {
-      // Normalize stroke points relative to bounding box origin for consistent AI accuracy
-      const minX = bbox.x;
-      const minY = bbox.y;
-      const scaleX = 800 / Math.max(10, bbox.width);
-      const scaleY = 600 / Math.max(10, bbox.height);
-      const targetScale = Math.min(scaleX, scaleY);
+    const ink = strokes.map(stroke => {
+      const xs: number[] = [];
+      const ys: number[] = [];
+      const ts: number[] = [];
+      const baseTime = stroke.points[0]?.time ?? 0;
 
-      const inkData = strokes.map(s => {
-        const xs: number[] = [];
-        const ys: number[] = [];
-        const ts: number[] = [];
-        const baseTime = s.points[0]?.time || Date.now();
-
-        s.points.forEach(p => {
-          xs.push(Math.round((p.x - minX) * targetScale));
-          ys.push(Math.round((p.y - minY) * targetScale));
-          ts.push(Math.round(p.time ? p.time - baseTime : 0));
-        });
-
-        return [xs, ys, ts];
+      stroke.points.forEach(p => {
+        xs.push(Math.round(p.x));
+        ys.push(Math.round(p.y));
+        ts.push(Math.max(0, Math.round(p.time - baseTime)));
       });
 
-      const response = await fetch('https://www.google.com/inputtools/request?ime=handwriting&app=mobilesearch&cs=1&oe=UTF-8', {
+      return [xs, ys, ts];
+    });
+
+    let response: Response;
+    try {
+      response = await fetch(INPUT_TOOLS_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal,
         body: JSON.stringify({
-          options: 'enable_homophone_converter',
+          options: 'enable_pre_space',
           requests: [
             {
-              writing_guide: { writing_area_width: 800, writing_area_height: 600 },
-              ink: inkData,
+              writing_guide: {
+                writing_area_width: Math.round(guideWidth),
+                writing_area_height: Math.round(guideHeight)
+              },
+              ink,
               language: 'vi'
             }
           ]
         })
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data[0] === 'SUCCESS' && data[1] && data[1][0] && data[1][0][1]) {
-          const candidates: string[] = data[1][0][1];
-          if (candidates.length > 0) {
-            const mainText = candidates[0];
-            const suggestions = Array.from(new Set([...candidates, ...this.userDictionary])).slice(0, 10);
-            return {
-              text: mainText,
-              confidence: 0.99,
-              boundingBox: bbox,
-              suggestions: suggestions,
-              strokesProcessed: strokeIds
-            };
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Google Ink Web API offline or failed, falling back to local engine:', e);
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw e;
+      throw new InkRecognitionError('Không kết nối được dịch vụ nhận diện', 'network');
     }
 
-    // Fallback if network unavailable
-    return this.recognizeStrokesSync(strokes);
+    if (!response.ok) {
+      throw new InkRecognitionError(`Dịch vụ nhận diện trả về lỗi ${response.status}`, 'network');
+    }
+
+    const data = await response.json();
+    if (data?.[0] !== 'SUCCESS' || !data?.[1]?.[0]?.[1]) {
+      throw new InkRecognitionError('Dịch vụ nhận diện trả về dữ liệu không đọc được', 'network');
+    }
+
+    const candidates: string[] = data[1][0][1];
+    if (candidates.length === 0) {
+      throw new InkRecognitionError('Không nhận ra chữ nào', 'empty');
+    }
+
+    return {
+      text: candidates[0],
+      candidates: Array.from(new Set(candidates)).slice(0, 6)
+    };
   }
 
   /**
-   * Synchronous / Offline fallback recognition
+   * Nhận diện vùng nét được khoanh bằng Lasso trên trang giấy.
+   *
+   * Dùng chung engine với bảng viết tay: dời nét về gốc khung bao rồi lấy chính
+   * kích thước khung bao làm `writing_guide`. Ném lỗi khi thất bại — KHÔNG có
+   * đường lui đoán bừa.
    */
-  public static recognizeStrokes(strokes: Stroke[]): InkRecognitionResult {
-    return this.recognizeStrokesSync(strokes);
-  }
-
-  private static recognizeStrokesSync(strokes: Stroke[]): InkRecognitionResult {
+  public static async recognizeSelection(strokes: Stroke[]): Promise<SelectionRecognitionResult> {
     if (strokes.length === 0) {
-      return {
-        text: '',
-        confidence: 0,
-        boundingBox: { x: 0, y: 0, width: 120, height: 50 },
-        suggestions: [],
-        strokesProcessed: []
-      };
+      throw new InkRecognitionError('Chưa chọn nét nào', 'empty');
     }
 
-    const bbox = this.getBoundingBox(strokes);
-    const strokeIds = strokes.map(s => s.id);
-    const strokeCount = strokes.length;
-    const aspectRatio = bbox.width / Math.max(1, bbox.height);
+    // Khung bao thô (không đệm) để làm hệ toạ độ gửi đi
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
 
-    let hasSlashUp = false;
-    let hasDot = false;
-    let hasHat = false;
+    strokes.forEach(stroke =>
+      stroke.points.forEach((p: Point) => {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      })
+    );
 
-    strokes.forEach(s => {
-      const pts = s.points;
-      if (pts.length < 2) {
-        hasDot = true;
-        return;
-      }
+    const rawWidth = Math.max(1, maxX - minX);
+    const rawHeight = Math.max(1, maxY - minY);
 
-      const sBbox = this.getBoundingBox([s]);
-      if (sBbox.y < bbox.y + bbox.height * 0.5 && sBbox.height < bbox.height * 0.35) {
-        const first = pts[0];
-        const last = pts[pts.length - 1];
-        const dx = last.x - first.x;
-        const dy = last.y - first.y;
+    const payload: RawInkStroke[] = strokes.map(stroke => ({
+      points: stroke.points.map(p => ({
+        x: p.x - minX,
+        y: p.y - minY,
+        time: p.time ?? 0
+      }))
+    }));
 
-        if (dy < -2 && dx > 2) hasSlashUp = true;
-        else if (pts.length >= 3 && Math.abs(dx) < 15 && Math.abs(dy) < 15) hasHat = true;
-      }
-    });
-
-    let mainText = 'Thái';
-    if (strokeCount === 1) {
-      if (aspectRatio < 0.6) mainText = 'I';
-      else if (aspectRatio > 2.5) mainText = '---';
-      else mainText = 'O';
-    } else if (hasSlashUp) {
-      mainText = 'Thái';
-    } else if (hasHat) {
-      mainText = 'Học tập';
-    } else if (hasDot) {
-      mainText = 'Ghi chú';
-    } else {
-      mainText = this.userDictionary[0] || 'Ghi chú';
-    }
-
-    const candidatePool = [mainText, ...this.userDictionary];
-    const suggestions = Array.from(new Set(candidatePool)).slice(0, 10);
+    // Chừa lề quanh nét giống như khi viết trên bảng, giúp engine ước lượng
+    // chiều cao chữ sát thực tế hơn.
+    const result = await this.recognizeLine(payload, rawWidth * 1.15, rawHeight * 1.6);
 
     return {
-      text: mainText,
-      confidence: 0.95,
-      boundingBox: bbox,
-      suggestions: suggestions,
-      strokesProcessed: strokeIds
+      text: result.text,
+      boundingBox: this.getBoundingBox(strokes),
+      suggestions: Array.from(new Set([...result.candidates, ...this.userDictionary])).slice(0, 12),
+      strokesProcessed: strokes.map(s => s.id)
     };
   }
 }

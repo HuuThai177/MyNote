@@ -10,10 +10,26 @@ import {
   Grid, 
   FileUp,
   FolderPlus,
-  Sparkles,
-  Palette
+  Ruler,
+  RectangleHorizontal,
+  RectangleVertical,
+  Layers2,
+  ShieldCheck,
+  ShieldAlert,
+  CloudUpload,
+  CloudDownload,
+  Loader2
 } from 'lucide-react';
-import { Notebook, PaperTemplate } from '../types/notebook';
+import {
+  Notebook,
+  PaperTemplate,
+  PaperSizeId,
+  PaperOrientation,
+  PAPER_SIZES,
+  DEFAULT_PAPER_SIZE,
+  DEFAULT_ORIENTATION
+} from '../types/notebook';
+import { PageThumbnail } from './PageThumbnail';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -21,14 +37,45 @@ interface SidebarProps {
   notebooks: Notebook[];
   activeNotebookId: string;
   onSelectNotebook: (id: string) => void;
-  onCreateNotebook: (title: string, category: string, template: PaperTemplate) => void;
+  onCreateNotebook: (
+    title: string,
+    category: string,
+    template: PaperTemplate,
+    paperSize: PaperSizeId,
+    orientation: PaperOrientation
+  ) => void;
   onDeleteNotebook: (id: string) => void;
   currentPageIndex: number;
   onSelectPage: (index: number) => void;
   onChangePageTemplate: (template: PaperTemplate) => void;
   onAddPage: () => void;
   onDeletePage: (index: number) => void;
+  // Khổ giấy
+  currentPaperSize: PaperSizeId;
+  currentOrientation: PaperOrientation;
+  onChangePageSize: (paperSize: PaperSizeId, orientation: PaperOrientation) => void;
+  onApplyPageSizeToNotebook: (paperSize: PaperSizeId, orientation: PaperOrientation) => void;
+  // Sao lưu toàn bộ thư viện
+  onCreateBackup: () => void;
+  onRestoreBackup: () => void;
+  isBackupBusy: boolean;
+  /** Mốc sao lưu gần nhất; null = chưa bao giờ sao lưu */
+  lastBackupAt: number | null;
 }
+
+/** Sao lưu thủ công thì cái chết người là quên — nên phải nói rõ đã bao lâu */
+const describeBackupAge = (
+  timestamp: number | null
+): { text: string; level: 'never' | 'fresh' | 'stale' | 'old' } => {
+  if (!timestamp) return { text: 'Chưa sao lưu lần nào', level: 'never' };
+
+  const days = Math.floor((Date.now() - timestamp) / 86400000);
+  if (days <= 0) return { text: 'Đã sao lưu hôm nay', level: 'fresh' };
+  if (days === 1) return { text: 'Sao lưu lần cuối: hôm qua', level: 'fresh' };
+  if (days < 7) return { text: `Sao lưu lần cuối: ${days} ngày trước`, level: 'fresh' };
+  if (days < 30) return { text: `Sao lưu lần cuối: ${days} ngày trước`, level: 'stale' };
+  return { text: `Sao lưu lần cuối: ${Math.floor(days / 30)} tháng trước`, level: 'old' };
+};
 
 const TEMPLATES: { id: PaperTemplate; name: string; previewClass: string }[] = [
   { id: 'ruled', name: 'Giấy Kẻ Ngang', previewClass: 'paper-ruled' },
@@ -51,20 +98,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectPage,
   onChangePageTemplate,
   onAddPage,
-  onDeletePage
+  onDeletePage,
+  currentPaperSize,
+  currentOrientation,
+  onChangePageSize,
+  onApplyPageSizeToNotebook,
+  onCreateBackup,
+  onRestoreBackup,
+  isBackupBusy,
+  lastBackupAt
 }) => {
+  const backupAge = describeBackupAge(lastBackupAt);
   const [activeTab, setActiveTab] = useState<'notebooks' | 'pages' | 'templates'>('notebooks');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newCategory, setNewCategory] = useState('Học Tập');
   const [newTemplate, setNewTemplate] = useState<PaperTemplate>('grid');
+  const [newPaperSize, setNewPaperSize] = useState<PaperSizeId>(DEFAULT_PAPER_SIZE);
+  const [newOrientation, setNewOrientation] = useState<PaperOrientation>(DEFAULT_ORIENTATION);
 
   const currentNotebook = notebooks.find(n => n.id === activeNotebookId);
+  const activeSpec = PAPER_SIZES.find(s => s.id === currentPaperSize);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
-    onCreateNotebook(newTitle.trim(), newCategory, newTemplate);
+    onCreateNotebook(newTitle.trim(), newCategory, newTemplate, newPaperSize, newOrientation);
     setNewTitle('');
     setShowCreateModal(false);
   };
@@ -124,7 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Tab Contents */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
           {/* TAB 1: NOTEBOOKS */}
           {activeTab === 'notebooks' && (
             <div className="space-y-3">
@@ -201,9 +260,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         : 'glass-card border-slate-700 hover:border-slate-500'
                     }`}
                   >
-                    <div className={`w-full h-32 rounded-lg border border-slate-600 overflow-hidden flex items-center justify-center ${pg.template === 'dark-neon' ? 'paper-dark-neon' : 'bg-white text-slate-800'}`}>
-                      <span className="text-xs font-semibold text-slate-400">Trang {index + 1}</span>
-                    </div>
+                    <PageThumbnail page={pg} width={150} />
                     <div className="w-full flex items-center justify-between text-xs px-1 text-slate-300">
                       <span>Trang {index + 1}</span>
                       {currentNotebook.pages.length > 1 && (
@@ -232,9 +289,107 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
 
-          {/* TAB 3: PAPER TEMPLATES */}
+          {/* TAB 3: PAPER TEMPLATES & SIZE */}
           {activeTab === 'templates' && (
             <div className="space-y-3">
+              {/* KHỔ GIẤY */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
+                  <Ruler className="w-4 h-4 text-emerald-400" />
+                  <span>Kích cỡ trang giấy</span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2">
+                  {PAPER_SIZES.map((spec) => {
+                    const isActive = currentPaperSize === spec.id;
+                    const orientationForSpec = spec.supportsOrientation ? currentOrientation : 'portrait';
+                    const isWide =
+                      spec.supportsOrientation && orientationForSpec === 'landscape';
+                    const displayWidth = isWide ? spec.height : spec.width;
+                    const displayHeight = isWide ? spec.width : spec.height;
+                    const previewScale = 34 / Math.max(displayWidth, displayHeight);
+
+                    return (
+                      <button
+                        key={spec.id}
+                        onClick={() => onChangePageSize(spec.id, orientationForSpec)}
+                        className={`p-3 rounded-xl border transition flex items-center gap-3 text-left ${
+                          isActive
+                            ? 'bg-emerald-600/25 border-emerald-500 text-white'
+                            : 'glass-card border-slate-700 text-slate-300 hover:border-slate-500'
+                        }`}
+                      >
+                        {/* Ô xem trước đúng tỉ lệ khổ giấy */}
+                        <div className="w-10 h-10 flex items-center justify-center shrink-0">
+                          <div
+                            className={`border-2 rounded-sm ${
+                              isActive ? 'border-emerald-400 bg-emerald-400/20' : 'border-slate-500 bg-slate-700/40'
+                            }`}
+                            style={{
+                              width: `${Math.max(8, displayWidth * previewScale)}px`,
+                              height: `${Math.max(8, displayHeight * previewScale)}px`
+                            }}
+                          />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-xs font-bold truncate">{spec.name}</h4>
+                          <p className="text-[11px] text-slate-400 truncate">{spec.description}</p>
+                        </div>
+
+                        {isActive && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* HƯỚNG GIẤY */}
+                {activeSpec?.supportsOrientation && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      onClick={() => onChangePageSize(currentPaperSize, 'portrait')}
+                      className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition ${
+                        currentOrientation === 'portrait'
+                          ? 'bg-indigo-600 text-white border-indigo-500'
+                          : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200'
+                      }`}
+                    >
+                      <RectangleVertical className="w-4 h-4" />
+                      <span>Khổ Dọc</span>
+                    </button>
+                    <button
+                      onClick={() => onChangePageSize(currentPaperSize, 'landscape')}
+                      className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition ${
+                        currentOrientation === 'landscape'
+                          ? 'bg-indigo-600 text-white border-indigo-500'
+                          : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200'
+                      }`}
+                    >
+                      <RectangleHorizontal className="w-4 h-4" />
+                      <span>Khổ Ngang</span>
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => {
+                    if (confirm(`Áp khổ giấy này cho toàn bộ ${currentNotebook?.pages.length || 0} trang của sổ tay?`)) {
+                      onApplyPageSizeToNotebook(currentPaperSize, currentOrientation);
+                    }
+                  }}
+                  className="w-full py-2.5 rounded-xl border border-dashed border-emerald-500/50 hover:bg-emerald-600/10 text-emerald-300 font-semibold text-xs flex items-center justify-center gap-2 transition"
+                >
+                  <Layers2 className="w-4 h-4" />
+                  <span>Áp cho toàn bộ sổ tay</span>
+                </button>
+
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Chuyển sang khổ nhỏ hơn có thể che phần nội dung nằm ngoài trang mới — dùng Ctrl+Z để hoàn tác nếu cần.
+                </p>
+              </div>
+
+              <div className="h-px bg-slate-800 my-3" />
+
               <p className="text-xs text-slate-400 mb-2">Chọn mẫu giấy nền cho trang hiện tại:</p>
               <div className="grid grid-cols-1 gap-2.5">
                 {TEMPLATES.map((tmpl) => (
@@ -260,6 +415,54 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </div>
           )}
+        </div>
+
+        {/* CHÂN: SAO LƯU & KHÔI PHỤC — luôn hiện ở mọi tab vì đây là thao tác
+            cấp toàn bộ thư viện, không thuộc riêng sổ tay hay trang nào */}
+        <div className="shrink-0 border-t border-slate-800 p-3 space-y-2">
+          <div
+            className={`flex items-center gap-1.5 text-[11px] font-bold px-0.5 ${
+              backupAge.level === 'fresh'
+                ? 'text-emerald-400'
+                : backupAge.level === 'stale'
+                  ? 'text-amber-400'
+                  : 'text-rose-400'
+            }`}
+          >
+            {backupAge.level === 'fresh' ? (
+              <ShieldCheck className="w-3.5 h-3.5" />
+            ) : (
+              <ShieldAlert className="w-3.5 h-3.5" />
+            )}
+            <span>{backupAge.text}</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={onCreateBackup}
+              disabled={isBackupBusy}
+              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/20 disabled:opacity-50 transition"
+              title="Đóng gói mọi sổ tay, ảnh và ghi âm thành một file zip rồi chia sẻ (chọn Google Drive để cất giữ)"
+            >
+              {isBackupBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
+              <span>Sao lưu</span>
+            </button>
+
+            <button
+              onClick={onRestoreBackup}
+              disabled={isBackupBusy}
+              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs disabled:opacity-50 transition"
+              title="Chọn file .zip sao lưu để khôi phục lại sổ tay"
+            >
+              <CloudDownload className="w-4 h-4 text-indigo-400" />
+              <span>Khôi phục</span>
+            </button>
+          </div>
+
+          <p className="text-[10px] text-slate-500 leading-relaxed">
+            Dữ liệu chỉ nằm trong bộ nhớ ứng dụng — gỡ app là mất. Hãy sao lưu định kỳ và
+            chọn Google Drive ở khay chia sẻ.
+          </p>
         </div>
       </div>
 
@@ -310,6 +513,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-400 block mb-1">Kích cỡ trang</label>
+                <select
+                  value={newPaperSize}
+                  onChange={(e) => setNewPaperSize(e.target.value as PaperSizeId)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500 text-sm"
+                >
+                  {PAPER_SIZES.map(s => (
+                    <option key={s.id} value={s.id}>{s.name.split(' (')[0]}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-400 block mb-1">Hướng giấy</label>
+                <select
+                  value={newOrientation}
+                  onChange={(e) => setNewOrientation(e.target.value as PaperOrientation)}
+                  disabled={!PAPER_SIZES.find(s => s.id === newPaperSize)?.supportsOrientation}
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500 text-sm disabled:opacity-50"
+                >
+                  <option value="portrait">Dọc</option>
+                  <option value="landscape">Ngang</option>
+                </select>
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
