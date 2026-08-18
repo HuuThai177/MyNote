@@ -101,11 +101,23 @@ export class PageRenderer {
       ctx.textBaseline = 'top';
 
       const lineHeight = element.fontSize * 1.28;
-      let cursorY = element.y + 8;
+      const padding = 8;
+      const usableWidth = element.width - padding * 2;
+      const align = element.textAlign ?? 'left';
+      let cursorY = element.y + padding;
 
       element.text.split('\n').forEach(paragraph => {
-        this.wrapLine(ctx, paragraph, element.width - 12).forEach(line => {
-          ctx.fillText(line, element.x + 8, cursorY);
+        this.wrapLine(ctx, paragraph, usableWidth).forEach(line => {
+          // Canh lề phải khớp với textAlign của textarea trên màn hình
+          const lineWidth = ctx.measureText(line).width;
+          const offsetX =
+            align === 'center'
+              ? (usableWidth - lineWidth) / 2
+              : align === 'right'
+                ? usableWidth - lineWidth
+                : 0;
+
+          ctx.fillText(line, element.x + padding + Math.max(0, offsetX), cursorY);
           cursorY += lineHeight;
         });
       });

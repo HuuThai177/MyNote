@@ -94,6 +94,8 @@ export interface Stroke {
   audioTimestamp?: number; // Time offset in seconds from audio recording start
 }
 
+export type TextAlign = 'left' | 'center' | 'right';
+
 export interface TextElement {
   id: string;
   x: number;
@@ -104,6 +106,8 @@ export interface TextElement {
   fontFamily: string; // 'Caveat', 'Dancing Script', 'Patrick Hand', 'Comfortaa', etc.
   fontSize: number;
   color: string;
+  /** Canh lề nội dung trong khung; mặc định 'left' khi thiếu */
+  textAlign?: TextAlign;
   originalStrokeIds?: string[];
 }
 

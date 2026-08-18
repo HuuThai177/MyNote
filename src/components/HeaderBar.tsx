@@ -86,8 +86,11 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showInsertMenu]);
 
+  // z-40 phải CAO HƠN thanh công cụ (z-30) bên dưới: cả hai đều là flex item nên
+  // đều tạo stacking context riêng; nếu cùng z-index thì cái đứng sau trong DOM
+  // sẽ đè lên, khiến menu thả xuống của header bị che mất.
   return (
-    <header className="chrome-bar chrome-bar-top h-14 w-full border-b px-3 flex items-center justify-between gap-3 z-30 select-none shrink-0">
+    <header className="chrome-bar chrome-bar-top h-14 w-full border-b px-3 flex items-center justify-between gap-3 z-40 select-none shrink-0">
       {/* ---------- Trái: điều hướng & tiêu đề ---------- */}
       <div className="flex items-center gap-2 min-w-0">
         <button

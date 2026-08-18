@@ -15,6 +15,7 @@ import { ShapeSmoother } from '../engine/ShapeSmoother';
 import { VietnameseInkRecognizer, InkRecognitionError } from '../engine/VietnameseInkRecognizer';
 import { LassoContextMenu } from './LassoContextMenu';
 import { InkToTextModal } from './InkToTextModal';
+import { TextElementToolbar } from './TextElementToolbar';
 import {
   Grip,
   Trash2,
@@ -26,7 +27,8 @@ import {
   Check,
   MousePointerClick,
   AudioLines,
-  PenLine
+  PenLine,
+  Shapes
 } from 'lucide-react';
 
 interface CanvasAreaProps {
@@ -112,6 +114,19 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
+  /**
+   * Bản sao luôn mới nhất của nét đang vẽ.
+   * Bộ đếm giờ nắn hình chạy trong setTimeout nên nó chỉ nhìn thấy giá trị
+   * `currentStroke` của lần render lúc hẹn giờ — thiếu mất những điểm vừa vẽ.
+   * Ref này cho nó dữ liệu đúng tại thời điểm bắn.
+   */
+  const currentStrokeRef = useRef<Point[]>([]);
+  useEffect(() => {
+    currentStrokeRef.current = currentStroke;
+  }, [currentStroke]);
+
+  /** Tên hình vừa được nắn, hiện thoáng qua để người dùng biết nó đã hoạt động */
+  const [shapeHint, setShapeHint] = useState<string | null>(null);
   const [lassoPolygon, setLassoPolygon] = useState<{ x: number; y: number }[]>([]);
   const [selectedStrokes, setSelectedStrokes] = useState<Stroke[]>([]);
   // Lasso chọn được cả khung chữ và ảnh, không chỉ nét vẽ
@@ -157,6 +172,16 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [isRecognizingSelection, setIsRecognizingSelection] = useState(false);
 
   const shapeHoldTimer = useRef<NodeJS.Timeout | null>(null);
+  const shapeHintTimer = useRef<NodeJS.Timeout | null>(null);
+  /** Nét hiện tại đã được nắn thành hình chuẩn, không nhận thêm điểm nữa */
+  const shapeSnappedRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (shapeHoldTimer.current) clearTimeout(shapeHoldTimer.current);
+      if (shapeHintTimer.current) clearTimeout(shapeHintTimer.current);
+    };
+  }, []);
 
   // Deselect text box when tool changes to pen/highlighter/eraser/lasso
   useEffect(() => {
@@ -532,13 +557,13 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     } else if (currentTool === 'text') {
       addTextElementAt(x, y);
     } else {
+      shapeSnappedRef.current = false;
       setCurrentStroke([pt]);
+      currentStrokeRef.current = [pt];
 
       if (smartShapeEnabled) {
         if (shapeHoldTimer.current) clearTimeout(shapeHoldTimer.current);
-        shapeHoldTimer.current = setTimeout(() => {
-          triggerShapeSmooth();
-        }, 500); // 0.5s Hold
+        shapeHoldTimer.current = setTimeout(triggerShapeSmooth, 500);
       }
     }
   };
@@ -670,13 +695,16 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     } else if (currentTool.startsWith('eraser')) {
       eraseAtPoint(x, y);
     } else if (currentTool === 'pen' || currentTool === 'highlighter') {
+      // Nét đã được nắn thành hình chuẩn thì giữ nguyên cho tới khi nhấc bút
+      if (shapeSnappedRef.current) return;
+
       setCurrentStroke(prev => [...prev, pt]);
 
       if (smartShapeEnabled && shapeHoldTimer.current) {
         clearTimeout(shapeHoldTimer.current);
-        shapeHoldTimer.current = setTimeout(() => {
-          triggerShapeSmooth();
-        }, 500); // 0.5s Hold
+        // Hẹn lại sau mỗi lần bút dịch chuyển: chỉ khi bút ĐỨNG YÊN đủ lâu thì
+        // bộ đếm mới bắn được.
+        shapeHoldTimer.current = setTimeout(triggerShapeSmooth, 500);
       }
     }
   };
@@ -765,6 +793,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     setIsDrawing(false);
 
     if (shapeHoldTimer.current) clearTimeout(shapeHoldTimer.current);
+    shapeSnappedRef.current = false;
 
     if (currentTool === 'lasso' && lassoPolygon.length > 2) {
       const { strokes, textIds, imageIds } = collectSelection(lassoPolygon);
@@ -1043,22 +1072,32 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
   };
 
-  // Smart Shape Smooth
+  // Nắn nét thành hình học khi giữ yên bút
   const triggerShapeSmooth = () => {
-    if (currentStroke.length < 5) return;
-    const tempStroke: Stroke = {
+    const points = currentStrokeRef.current;
+    if (points.length < 8) return;
+
+    const smoothed = ShapeSmoother.detectAndSmooth({
       id: 'temp',
       tool: currentTool,
       color,
       size,
       opacity: 1,
-      points: currentStroke
-    };
+      points
+    });
 
-    const smoothed = ShapeSmoother.detectAndSmooth(tempStroke);
-    if (smoothed) {
-      setCurrentStroke(smoothed.smoothedPoints);
-    }
+    if (!smoothed) return;
+
+    setCurrentStroke(smoothed.smoothedPoints);
+    currentStrokeRef.current = smoothed.smoothedPoints;
+
+    // Đã nắn xong thì khoá nét lại: nếu vẫn cho thêm điểm, mỗi rung tay nhỏ sẽ
+    // nối thêm vào hình vừa nắn và phá hỏng nó.
+    shapeSnappedRef.current = true;
+
+    setShapeHint(smoothed.label);
+    if (shapeHintTimer.current) clearTimeout(shapeHintTimer.current);
+    shapeHintTimer.current = setTimeout(() => setShapeHint(null), 1400);
   };
 
   // Add Text Element
@@ -1177,6 +1216,14 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       onPointerUp={handlePointerUp}
       className={`relative w-full h-full overflow-hidden select-none ${audioSeekMode ? 'cursor-help' : ''}`}
     >
+      {/* Báo đã nắn hình — không có phản hồi thì người dùng tưởng tính năng hỏng */}
+      {shapeHint && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2 rounded-full bg-purple-600 text-white text-xs font-bold shadow-xl animate-pop pointer-events-none">
+          <Shapes className="w-4 h-4" />
+          <span>Đã nắn thành {shapeHint}</span>
+        </div>
+      )}
+
       {/* Nhắc chế độ chạm nét vẽ để nghe lại — nằm ngoài vùng cuộn nên không trôi */}
       {audioSeekMode && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/95 text-amber-950 text-xs font-bold shadow-xl animate-pop pointer-events-none">
@@ -1399,83 +1446,34 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
                 height: `${txt.height}px`
               }}
             >
-              {/* Active Floating Text Toolbar */}
+              {/* Thanh công cụ nổi của khung chữ đang chọn */}
               {isSelected && (
-                <div className="chrome-bar chrome-bar-float absolute -top-12 left-0 right-0 px-2 py-1 rounded-xl flex items-center justify-between gap-2 z-30 border animate-pop">
-                  {/* Drag Handle */}
-                  <div
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      // Quy đổi về toạ độ canvas để khung chữ không bị nhảy khi zoom
-                      const local = toCanvasPoint(e.clientX, e.clientY);
-                      beginGesture('text-move');
-                      setSelectedTextId(txt.id);
-                      setIsDraggingText(true);
-                      setDragOffset({ x: local.x - txt.x, y: local.y - txt.y });
-                    }}
-                    className="flex items-center gap-1 px-1.5 cursor-grab active:cursor-grabbing text-indigo-600 hover:text-indigo-800 font-bold text-[11px]"
-                    title="Giữ và kéo để di chuyển khung chữ"
-                  >
-                    <Grip className="w-4 h-4" />
-                    <span className="hidden sm:inline">Kéo</span>
-                  </div>
-
-                  {/* Font Size & Actions */}
-                  <div className="flex items-center gap-1">
-                    {/* Bật bảng viết tay điền chữ cho khung này */}
-                    <button
-                      onClick={() => onRequestInkInput(txt.id)}
-                      className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-bold border transition ${
-                        inkInputTargetId === txt.id
-                          ? 'bg-amber-500 text-white border-amber-400'
-                          : 'bg-white text-indigo-700 border-slate-200 hover:bg-indigo-600 hover:text-white hover:border-indigo-600'
-                      }`}
-                      title="Viết tay bên ngoài để tự động điền chữ Tiếng Việt vào khung này"
-                    >
-                      <PenLine className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Viết tay</span>
-                    </button>
-
-                    <div className="h-4 w-px bg-slate-200 mx-0.5" />
-
-                    <button
-                      onClick={() => {
-                        const updated = page.textElements.map(t => t.id === txt.id ? { ...t, fontSize: Math.max(14, t.fontSize - 2) } : t);
-                        onPageUpdate({ ...page, textElements: updated }, `font-${txt.id}`);
-                      }}
-                      className="chrome-btn w-7 h-7"
-                      title="Thu nhỏ font"
-                    >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="text-[11px] font-bold text-slate-600 px-0.5 tabular-nums">{txt.fontSize}</span>
-                    <button
-                      onClick={() => {
-                        const updated = page.textElements.map(t => t.id === txt.id ? { ...t, fontSize: Math.min(72, t.fontSize + 2) } : t);
-                        onPageUpdate({ ...page, textElements: updated }, `font-${txt.id}`);
-                      }}
-                      className="chrome-btn w-7 h-7"
-                      title="Phóng to font"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-
-                    <div className="h-4 w-px bg-slate-200 mx-0.5" />
-
-                    {/* Delete Text Element */}
-                    <button
-                      onClick={() => {
-                        const updated = page.textElements.filter(t => t.id !== txt.id);
-                        onPageUpdate({ ...page, textElements: updated });
-                        setSelectedTextId(null);
-                      }}
-                      className="chrome-btn w-7 h-7 hover:bg-rose-50 hover:text-rose-600"
-                      title="Xoá khung chữ này"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
+                <TextElementToolbar
+                  element={txt}
+                  isInkTarget={inkInputTargetId === txt.id}
+                  onPatch={(patch, coalesceKey) => {
+                    const updated = page.textElements.map(t =>
+                      t.id === txt.id ? { ...t, ...patch } : t
+                    );
+                    onPageUpdate({ ...page, textElements: updated }, coalesceKey);
+                  }}
+                  onStartDrag={(e) => {
+                    e.stopPropagation();
+                    const local = toCanvasPoint(e.clientX, e.clientY);
+                    beginGesture('text-move');
+                    setSelectedTextId(txt.id);
+                    setIsDraggingText(true);
+                    setDragOffset({ x: local.x - txt.x, y: local.y - txt.y });
+                  }}
+                  onRequestInkInput={() => onRequestInkInput(txt.id)}
+                  onDelete={() => {
+                    onPageUpdate({
+                      ...page,
+                      textElements: page.textElements.filter(t => t.id !== txt.id)
+                    });
+                    setSelectedTextId(null);
+                  }}
+                />
               )}
 
               {/* Editable Text Area */}
@@ -1490,7 +1488,8 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
                 style={{
                   fontFamily: txt.fontFamily,
                   color: txt.color || '#1F2937',
-                  fontSize: `${txt.fontSize}px`
+                  fontSize: `${txt.fontSize}px`,
+                  textAlign: txt.textAlign ?? 'left'
                 }}
               />
 

@@ -151,16 +151,21 @@ export class VietnameseInkRecognizer {
       throw new InkRecognitionError('Thiết bị đang offline', 'offline');
     }
 
+    // MỐC THỜI GIAN DÙNG CHUNG cho mọi nét.
+    // Bản trước đặt lại mốc về 0 cho TỪNG nét, làm mất hoàn toàn thông tin
+    // "nét nào viết trước, cách nét trước bao lâu" — đó chính là tín hiệu engine
+    // dựa vào để biết đâu là dấu thêm sau và đâu là chữ mới.
+    const globalBaseTime = strokes[0]?.points[0]?.time ?? 0;
+
     const ink = strokes.map(stroke => {
       const xs: number[] = [];
       const ys: number[] = [];
       const ts: number[] = [];
-      const baseTime = stroke.points[0]?.time ?? 0;
 
       stroke.points.forEach(p => {
         xs.push(Math.round(p.x));
         ys.push(Math.round(p.y));
-        ts.push(Math.max(0, Math.round(p.time - baseTime)));
+        ts.push(Math.max(0, Math.round((p.time ?? globalBaseTime) - globalBaseTime)));
       });
 
       return [xs, ys, ts];
