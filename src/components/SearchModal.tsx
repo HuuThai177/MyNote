@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, X, BookOpen, FileText, PenLine, Image as ImageIcon, AudioLines, CornerDownLeft } from 'lucide-react';
+import { Search, X, BookOpen, FileText, PenLine, Image as ImageIcon, AudioLines, CornerDownLeft, Pencil, Info } from 'lucide-react';
 import { Notebook } from '../types/notebook';
 
 interface SearchModalProps {
@@ -15,7 +15,7 @@ interface SearchHit {
   category: string;
   pageIndex: number;
   snippet: string;
-  matchedIn: 'title' | 'text';
+  matchedIn: 'title' | 'text' | 'ink';
   strokeCount: number;
   imageCount: number;
   audioCount: number;
@@ -80,10 +80,19 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, notebooks, onJ
           audioCount: page.audioNotes?.length || 0
         };
 
+        // Chữ viết tay đã được nhận diện và lưu vào chỉ mục
+        const inkText = page.inkIndex?.text || '';
+        const inkMatches = inkText.length > 0 && normalizeVi(inkText).includes(needle);
+
         if (matchingTexts.length > 0) {
           matchingTexts.forEach(t => {
             results.push({ ...base, matchedIn: 'text', snippet: buildSnippet(t.text, needle) });
           });
+          if (inkMatches) {
+            results.push({ ...base, matchedIn: 'ink', snippet: buildSnippet(inkText, needle) });
+          }
+        } else if (inkMatches) {
+          results.push({ ...base, matchedIn: 'ink', snippet: buildSnippet(inkText, needle) });
         } else if (titleMatches && pageIndex === 0) {
           // Khớp tên sổ tay: chỉ trả về một kết quả đại diện ở trang đầu
           results.push({
@@ -101,6 +110,14 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, notebooks, onJ
   }, [query, notebooks]);
 
   if (!isOpen) return null;
+
+  // Trang có nét vẽ nhưng chưa đánh chỉ mục thì tìm kiếm không thấy được
+  const pendingInkPages = notebooks.reduce(
+    (count, nb) =>
+      count +
+      nb.pages.filter(p => (p.strokes?.length ?? 0) > 0 && !p.inkIndex).length,
+    0
+  );
 
   return (
     <div
@@ -140,8 +157,10 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, notebooks, onJ
         <div className="max-h-[55vh] overflow-y-auto">
           {query.trim().length === 0 && (
             <div className="px-5 py-8 text-center text-slate-500 text-xs space-y-2">
-              <p className="font-semibold text-slate-400">Tìm theo tên sổ tay, danh mục hoặc nội dung chữ đã nhận diện</p>
-              <p>Chữ viết tay chưa chuyển thành text sẽ không tìm được — hãy dùng Lasso → Đổi Font Chữ trước.</p>
+              <p className="font-semibold text-slate-400">
+                Tìm theo tên sổ tay, danh mục, khung chữ và cả chữ viết tay
+              </p>
+              <p>Không cần gõ dấu: “hoc tap” vẫn khớp “Học Tập”.</p>
             </div>
           )}
 
@@ -161,7 +180,13 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, notebooks, onJ
               className="w-full text-left px-4 py-3 border-b border-slate-800/70 hover:bg-indigo-600/15 transition group flex items-start gap-3"
             >
               <div className="p-2 rounded-lg bg-slate-800 text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white transition shrink-0 mt-0.5">
-                {hit.matchedIn === 'title' ? <BookOpen className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                {hit.matchedIn === 'title' ? (
+                  <BookOpen className="w-4 h-4" />
+                ) : hit.matchedIn === 'ink' ? (
+                  <Pencil className="w-4 h-4" />
+                ) : (
+                  <FileText className="w-4 h-4" />
+                )}
               </div>
 
               <div className="min-w-0 flex-1">
@@ -171,6 +196,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, notebooks, onJ
                   <span className="text-indigo-400 font-semibold">{hit.category}</span>
                   <span className="text-slate-600">•</span>
                   <span className="text-slate-400 shrink-0">Trang {hit.pageIndex + 1}</span>
+                  {hit.matchedIn === 'ink' && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold shrink-0">
+                      chữ viết tay
+                    </span>
+                  )}
                 </div>
 
                 <p className="text-sm text-slate-300 mt-1 line-clamp-2">{hit.snippet}</p>
@@ -190,6 +220,17 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, notebooks, onJ
             </button>
           ))}
         </div>
+
+        {/* Nhắc còn trang chưa đánh chỉ mục */}
+        {pendingInkPages > 0 && query.trim().length > 0 && (
+          <div className="px-4 py-2 bg-amber-500/10 border-t border-amber-500/25 flex items-start gap-2">
+            <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-[11px] text-amber-200/90 leading-snug">
+              Còn <span className="font-bold">{pendingInkPages} trang</span> viết tay chưa đánh chỉ mục
+              nên chưa tìm thấy được. Vào Sổ Tay → Chỉ mục tìm kiếm để đánh chỉ mục.
+            </p>
+          </div>
+        )}
 
         {/* Chân modal */}
         <div className="px-4 py-2.5 bg-slate-900/60 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">

@@ -27,7 +27,9 @@ import {
   PenLine,
   Download,
   WifiOff,
-  Wifi
+  Wifi,
+  Search,
+  Square
 } from 'lucide-react';
 import {
   Notebook,
@@ -84,6 +86,11 @@ interface SidebarProps {
   inkModelStatus: 'unsupported' | 'unknown' | 'missing' | 'downloading' | 'ready';
   onDownloadInkModel: () => void;
   onDeleteInkModel: () => void;
+  // Chỉ mục tìm kiếm chữ viết tay
+  inkIndexStats: { indexed: number; total: number };
+  indexProgress: { done: number; total: number; currentNotebook: string } | null;
+  onStartIndexing: () => void;
+  onStopIndexing: () => void;
 }
 
 /** Sao lưu thủ công thì cái chết người là quên — nên phải nói rõ đã bao lâu */
@@ -138,7 +145,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onMovePageToNotebook,
   inkModelStatus,
   onDownloadInkModel,
-  onDeleteInkModel
+  onDeleteInkModel,
+  inkIndexStats,
+  indexProgress,
+  onStartIndexing,
+  onStopIndexing
 }) => {
   const backupAge = describeBackupAge(lastBackupAt);
   const [activeTab, setActiveTab] = useState<'notebooks' | 'pages' | 'templates'>('notebooks');
@@ -671,6 +682,65 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
         </div>
+
+        {/* CHÂN: CHỈ MỤC TÌM KIẾM CHỮ VIẾT TAY */}
+        {inkModelStatus === 'ready' && (
+          <div className="shrink-0 px-3 pb-2">
+            {indexProgress ? (
+              <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />
+                    <span className="text-[11px] font-bold text-slate-200 truncate">
+                      Đang đọc trang {indexProgress.done + 1}/{indexProgress.total}
+                    </span>
+                  </div>
+                  <button
+                    onClick={onStopIndexing}
+                    className="p-1 rounded text-slate-400 hover:text-rose-400 shrink-0"
+                    title="Dừng đánh chỉ mục"
+                  >
+                    <Square className="w-3 h-3 fill-current" />
+                  </button>
+                </div>
+                <div className="h-1 rounded-full bg-slate-700 overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-500 transition-all"
+                    style={{
+                      width: `${indexProgress.total > 0 ? (indexProgress.done / indexProgress.total) * 100 : 0}%`
+                    }}
+                  />
+                </div>
+                {indexProgress.currentNotebook && (
+                  <p className="text-[10px] text-slate-500 truncate">{indexProgress.currentNotebook}</p>
+                )}
+              </div>
+            ) : inkIndexStats.total === 0 ? null : inkIndexStats.indexed >= inkIndexStats.total ? (
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/60">
+                <Search className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <p className="text-[10px] text-slate-400 leading-snug">
+                  Tìm kiếm thấy cả chữ viết tay của{' '}
+                  <span className="font-bold text-slate-300">{inkIndexStats.total} trang</span>
+                </p>
+              </div>
+            ) : (
+              <button
+                onClick={onStartIndexing}
+                className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/40 hover:bg-amber-500/25 transition text-left"
+              >
+                <Search className="w-4 h-4 text-amber-300 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold text-amber-200">
+                    Đánh chỉ mục {inkIndexStats.total - inkIndexStats.indexed} trang viết tay
+                  </p>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    Đọc nét chữ ngay trên máy để tìm kiếm thấy được
+                  </p>
+                </div>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* CHÂN: SAO LƯU & KHÔI PHỤC — luôn hiện ở mọi tab vì đây là thao tác
             cấp toàn bộ thư viện, không thuộc riêng sổ tay hay trang nào */}

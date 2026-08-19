@@ -166,6 +166,16 @@ export interface AudioNote {
   createdAt: number;
 }
 
+/** Chữ viết tay của một trang sau khi đã nhận diện, phục vụ tìm kiếm */
+export interface InkIndex {
+  /** Toàn bộ chữ đọc được, mỗi dòng viết tay là một dòng text */
+  text: string;
+  /** Dấu vân của tập nét lúc đánh chỉ mục — khác đi nghĩa là chỉ mục đã cũ */
+  signature: string;
+  indexedAt: number;
+  lineCount: number;
+}
+
 export interface NotebookPage {
   id: string;
   pageIndex: number;
@@ -182,6 +192,8 @@ export interface NotebookPage {
   /** Khoá tới Blob ảnh nền PDF trong store `assets` */
   pdfAssetId?: string;
   pdfSourceName?: string;
+  /** Kết quả nhận diện chữ viết tay để tìm kiếm; không ảnh hưởng hiển thị */
+  inkIndex?: InkIndex;
   strokes: Stroke[];
   textElements: TextElement[];
   imageElements: ImageElement[];

@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Notebook,
   NotebookPage,
+  InkIndex,
   ToolType,
   PaperTemplate,
   AudioNote,
@@ -16,6 +17,7 @@ import {
 import { clampZoom, getPageSizeLabel } from './engine/PageGeometry';
 import { PageOps, ClipboardPayload } from './engine/PageOps';
 import { InkRecognitionService, ModelStatus, MODEL_SIZE_LABEL } from './engine/InkRecognitionService';
+import { InkIndexer, IndexProgress } from './engine/InkIndexer';
 import { StorageEngine, SaveResult } from './engine/StorageEngine';
 import { AudioSyncEngine } from './engine/AudioSyncEngine';
 import { HistoryEngine } from './engine/HistoryEngine';
@@ -916,6 +918,71 @@ export const App: React.FC = () => {
     );
   };
 
+  // ---------------------------------------------------------------------------
+  // Đánh chỉ mục chữ viết tay để tìm kiếm
+  // ---------------------------------------------------------------------------
+  const indexerRef = useRef<InkIndexer | null>(null);
+  const [indexProgress, setIndexProgress] = useState<IndexProgress | null>(null);
+
+  /**
+   * Ghi chỉ mục vào trang mà KHÔNG đưa vào lịch sử hoàn tác.
+   *
+   * Đánh chỉ mục là việc của máy, không phải thao tác của người dùng. Nếu mỗi
+   * trang được đánh chỉ mục thành một bước undo thì bấm Ctrl+Z sẽ đi lùi qua
+   * hàng chục bước vô nghĩa thay vì hoàn tác nét vừa vẽ.
+   */
+  const applyInkIndex = useCallback((notebookId: string, pageId: string, index: InkIndex) => {
+    const library = notebooksRef.current;
+    const notebook = library.find(n => n.id === notebookId);
+    if (!notebook) return;
+
+    const pageIndex = notebook.pages.findIndex(p => p.id === pageId);
+    if (pageIndex < 0) return;
+
+    const pages = [...notebook.pages];
+    pages[pageIndex] = { ...pages[pageIndex], inkIndex: index };
+
+    const next = library.map(n => (n.id === notebookId ? { ...n, pages } : n));
+    notebooksRef.current = next;
+    setNotebooks(next);
+  }, []);
+
+  const handleStartIndexing = async () => {
+    if (indexerRef.current) return;
+
+    if (InkRecognitionService.getStatus() !== 'ready') {
+      setToast({
+        type: 'error',
+        message: 'Cần tải mô hình ngoại tuyến trước. Đánh chỉ mục cả thư viện qua mạng sẽ rất chậm.'
+      });
+      return;
+    }
+
+    const indexer = new InkIndexer();
+    indexerRef.current = indexer;
+
+    const result = await indexer.run(notebooksRef.current, applyInkIndex, setIndexProgress);
+
+    indexerRef.current = null;
+    setIndexProgress(null);
+    setToast({
+      type: 'info',
+      message: result.cancelled
+        ? `Đã dừng. Kịp đánh chỉ mục ${result.done} trang.`
+        : result.done === 0
+          ? 'Mọi trang viết tay đều đã có chỉ mục.'
+          : `Đã đánh chỉ mục ${result.done} trang. Giờ tìm kiếm thấy được cả chữ viết tay.`
+    });
+  };
+
+  const handleStopIndexing = () => {
+    indexerRef.current?.cancel();
+    indexerRef.current = null;
+    setIndexProgress(null);
+  };
+
+  const inkIndexStats = useMemo(() => InkIndexer.countIndexable(notebooks), [notebooks]);
+
   const handleDeleteInkModel = async () => {
     await InkRecognitionService.deleteModel();
     setToast({ type: 'info', message: 'Đã xoá mô hình ngoại tuyến. Nhận diện sẽ quay lại dùng mạng.' });
@@ -1214,6 +1281,10 @@ export const App: React.FC = () => {
         inkModelStatus={inkModelStatus}
         onDownloadInkModel={handleDownloadInkModel}
         onDeleteInkModel={handleDeleteInkModel}
+        inkIndexStats={inkIndexStats}
+        indexProgress={indexProgress}
+        onStartIndexing={handleStartIndexing}
+        onStopIndexing={handleStopIndexing}
       />
 
       {/* Tìm kiếm toàn bộ sổ tay */}
