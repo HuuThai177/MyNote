@@ -36,7 +36,7 @@ interface ToolbarProps {
   onChangeFontFamily: (font: string) => void;
   smartShapeEnabled: boolean;
   onToggleSmartShape: () => void;
-  /** Kẻ thẳng: mọi nét bút được nắn thành đoạn thẳng */
+  /** Hiện thước kẻ vật lý trên trang giấy */
   rulerEnabled: boolean;
   onToggleRuler: () => void;
   // Điều khiển khung nhìn (chuyển từ header sang đây cho đúng nhóm chức năng)
@@ -376,10 +376,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 ? 'bg-sky-50 text-sky-700 border-sky-300'
                 : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'
             }`}
-            title="Mọi nét vẽ được nắn thành đoạn thẳng, tự bắt ngang và dọc"
+            title="Đặt thước lên trang: kéo và xoay được, nét bút tự hút vào cạnh thước"
           >
             <Ruler className={`w-4 h-4 ${rulerEnabled ? 'text-sky-600' : 'text-slate-400'}`} />
-            <span className="hidden lg:inline">Kẻ thẳng</span>
+            <span className="hidden lg:inline">Thước kẻ</span>
           </button>
         )}
 

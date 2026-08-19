@@ -1293,6 +1293,7 @@ export const App: React.FC = () => {
             fontFamily={fontFamily}
             smartShapeEnabled={smartShapeEnabled}
             rulerEnabled={rulerEnabled}
+            onDisableRuler={() => setRulerEnabled(false)}
             palmRejectionActive={palmRejectionActive}
             zoomLevel={zoomLevel}
             onPageUpdate={applyPageUpdate}
@@ -1354,14 +1355,14 @@ export const App: React.FC = () => {
       {/* Tiến trình render PDF */}
       {pdfProgress && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm">
-          <div className="glass-panel rounded-2xl px-8 py-6 border border-slate-700 shadow-2xl animate-pop flex flex-col items-center gap-3">
-            <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
-            <p className="text-sm font-bold text-white">Đang chuyển trang PDF thành nền ghi chú…</p>
-            <p className="text-xs text-slate-400">
+          <div className="chrome-bar chrome-bar-float rounded-2xl px-8 py-6 border animate-pop flex flex-col items-center gap-3">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+            <p className="text-sm font-bold text-slate-900">Đang chuyển trang PDF thành nền ghi chú…</p>
+            <p className="text-xs text-slate-500">
               {pdfProgress.total > 0 ? `Trang ${pdfProgress.current} / ${pdfProgress.total}` : 'Đang đọc file…'}
             </p>
             {pdfProgress.total > 0 && (
-              <div className="w-56 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+              <div className="w-56 h-1.5 rounded-full bg-slate-200 overflow-hidden">
                 <div
                   className="h-full bg-blue-500 transition-all"
                   style={{ width: `${(pdfProgress.current / pdfProgress.total) * 100}%` }}

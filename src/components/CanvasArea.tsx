@@ -17,6 +17,7 @@ import { VietnameseInkRecognizer, InkRecognitionError } from '../engine/Vietname
 import { LassoContextMenu } from './LassoContextMenu';
 import { InkToTextModal } from './InkToTextModal';
 import { TextElementToolbar } from './TextElementToolbar';
+import { RulerOverlay, RulerState, snapPointToRuler } from './RulerOverlay';
 import {
   Grip,
   Trash2,
@@ -41,8 +42,9 @@ interface CanvasAreaProps {
   size: number;
   fontFamily: string;
   smartShapeEnabled: boolean;
-  /** Kẻ thẳng: nét bút được nắn thành đoạn thẳng ngay khi vẽ */
+  /** Hiện thước kẻ trên trang; nét bút hút vào cạnh thước */
   rulerEnabled: boolean;
+  onDisableRuler: () => void;
   palmRejectionActive: boolean;
   zoomLevel: number;
   /** `coalesceKey` gộp một chuỗi thao tác liên tục thành 1 bước hoàn tác */
@@ -86,6 +88,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   fontFamily,
   smartShapeEnabled,
   rulerEnabled,
+  onDisableRuler,
   palmRejectionActive,
   zoomLevel,
   onPageUpdate,
@@ -194,6 +197,25 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   const shapeHoldTimer = useRef<NodeJS.Timeout | null>(null);
   const shapeHintTimer = useRef<NodeJS.Timeout | null>(null);
+  /** Vị trí thước kẻ trên trang; null khi chưa bật */
+  const [ruler, setRuler] = useState<RulerState | null>(null);
+
+  // Bật thước thì đặt sẵn ở giữa trang, tắt thì cất đi
+  useEffect(() => {
+    if (rulerEnabled) {
+      setRuler(prev =>
+        prev ?? {
+          x: pageWidth / 2,
+          y: pageHeight * 0.4,
+          angle: 0,
+          length: Math.min(720, Math.max(280, pageWidth * 0.7))
+        }
+      );
+    } else {
+      setRuler(null);
+    }
+  }, [rulerEnabled, pageWidth, pageHeight]);
+
   /** Nét hiện tại đã được nắn thành hình chuẩn, không nhận thêm điểm nữa */
   const shapeSnappedRef = useRef(false);
 
@@ -579,10 +601,12 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       addTextElementAt(x, y);
     } else {
       shapeSnappedRef.current = false;
-      setCurrentStroke([pt]);
-      currentStrokeRef.current = [pt];
+      const startPoint = ruler ? (snapPointToRuler(pt, ruler) ?? pt) : pt;
+      const first = { ...pt, x: startPoint.x, y: startPoint.y };
+      setCurrentStroke([first]);
+      currentStrokeRef.current = [first];
 
-      if (smartShapeEnabled && !rulerEnabled) {
+      if (smartShapeEnabled && !ruler) {
         if (shapeHoldTimer.current) clearTimeout(shapeHoldTimer.current);
         shapeHoldTimer.current = setTimeout(triggerShapeSmooth, 500);
       }
@@ -719,21 +743,19 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       // Nét đã được nắn thành hình chuẩn thì giữ nguyên cho tới khi nhấc bút
       if (shapeSnappedRef.current) return;
 
-      // Chế độ kẻ thẳng: nét luôn chỉ gồm điểm đầu và điểm hiện tại, nên người
-      // dùng thấy ngay đoạn thẳng sẽ ra thay vì đường tay run
-      if (rulerEnabled) {
-        setCurrentStroke(prev => {
-          const start = prev[0] ?? pt;
-          const next = [start, snapToAxis(start, pt)];
-          currentStrokeRef.current = next;
-          return next;
-        });
-        return;
+      // Có thước trên trang: nét bút bị hút vào cạnh thước khi vẽ đủ gần,
+      // ra ngoài tầm hút thì vẫn vẽ tự do như bình thường
+      if (ruler) {
+        const snapped = snapPointToRuler(pt, ruler);
+        if (snapped) {
+          setCurrentStroke(prev => [...prev, { ...pt, x: snapped.x, y: snapped.y }]);
+          return;
+        }
       }
 
       setCurrentStroke(prev => [...prev, pt]);
 
-      if (smartShapeEnabled && !rulerEnabled && shapeHoldTimer.current) {
+      if (smartShapeEnabled && !ruler && shapeHoldTimer.current) {
         clearTimeout(shapeHoldTimer.current);
         // Hẹn lại sau mỗi lần bút dịch chuyển: chỉ khi bút ĐỨNG YÊN đủ lâu thì
         // bộ đếm mới bắn được.
@@ -989,18 +1011,6 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         gestureKeyRef.current
       );
     }
-  };
-
-  /**
-   * Bắt về phương ngang hoặc dọc khi nét đã gần đúng (lệch dưới ~8°).
-   * Kẻ bảng biểu bằng tay gần như không bao giờ thẳng tuyệt đối được.
-   */
-  const snapToAxis = (start: Point, end: Point): Point => {
-    const dx = Math.abs(end.x - start.x);
-    const dy = Math.abs(end.y - start.y);
-    if (dy < dx * 0.14) return { ...end, y: start.y };
-    if (dx < dy * 0.14) return { ...end, x: start.x };
-    return end;
   };
 
   /**
@@ -1612,6 +1622,16 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
             </div>
           );
         })}
+
+        {/* Thước kẻ — nằm trên lớp mực để nhận được thao tác kéo/xoay của chính nó */}
+        {ruler && (
+          <RulerOverlay
+            ruler={ruler}
+            onChange={setRuler}
+            onClose={onDisableRuler}
+            toCanvasPoint={toCanvasPoint}
+          />
+        )}
 
         {/* Render Text Elements */}
         {page.textElements.map((txt) => {

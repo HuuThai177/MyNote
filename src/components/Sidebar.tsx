@@ -212,35 +212,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex">
       {/* Backdrop */}
-      <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity" onClick={onClose} />
+      <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
 
       {/* Drawer Container */}
       <div
-        className="relative w-80 sm:w-96 h-full glass-panel border-r border-slate-700/70 shadow-2xl flex flex-col z-10 animate-pop"
+        className="relative w-80 sm:w-96 h-full chrome-bar chrome-bar-float border-r border-slate-200 shadow-2xl flex flex-col z-10 animate-pop"
         onPointerMove={handleDragMove}
         onPointerUp={finishPageDrag}
         onPointerCancel={finishPageDrag}
       >
         {/* Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <BookOpen className="w-6 h-6 text-indigo-400" />
-            <span className="font-bold text-lg text-white">PadNote AI</span>
+            <BookOpen className="w-6 h-6 text-indigo-600" />
+            <span className="font-bold text-lg text-slate-900">PadNote AI</span>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition"
+            className="p-2 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-900 transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Tab Switcher */}
-        <div className="p-2 m-3 bg-slate-900/80 rounded-xl border border-slate-800 flex gap-1">
+        <div className="p-2 m-3 bg-slate-50 rounded-xl border border-slate-200 flex gap-1">
           <button
             onClick={() => setActiveTab('notebooks')}
             className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-              activeTab === 'notebooks' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+              activeTab === 'notebooks' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-800'
             }`}
           >
             <BookOpen className="w-4 h-4" />
@@ -249,7 +249,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => setActiveTab('pages')}
             className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-              activeTab === 'pages' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+              activeTab === 'pages' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-800'
             }`}
           >
             <Layers className="w-4 h-4" />
@@ -258,7 +258,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => setActiveTab('templates')}
             className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-              activeTab === 'templates' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+              activeTab === 'templates' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-800'
             }`}
           >
             <Grid className="w-4 h-4" />
@@ -288,8 +288,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       key={nb.id}
                       className={`group rounded-2xl border transition ${
                         nb.id === activeNotebookId
-                          ? 'bg-indigo-950/60 border-indigo-500/60 text-white shadow-md'
-                          : 'glass-card text-slate-300 hover:border-slate-600'
+                          ? 'bg-indigo-50 border-indigo-300 text-slate-900 shadow-md'
+                          : 'bg-white border border-slate-200 hover:border-slate-300 text-slate-700 hover:border-slate-300'
                       }`}
                     >
                       <div
@@ -311,7 +311,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           <div className="min-w-0">
                             <h4 className="font-bold text-sm line-clamp-1">{nb.title}</h4>
                             <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-                              <span className="text-indigo-400 font-medium truncate">{nb.category}</span>
+                              <span className="text-indigo-600 font-medium truncate">{nb.category}</span>
                               <span>•</span>
                               <span className="shrink-0">{nb.pages.length} trang</span>
                             </div>
@@ -326,8 +326,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             }}
                             className={`p-2 rounded-lg transition ${
                               isEditing
-                                ? 'text-indigo-300 bg-slate-800'
-                                : 'text-slate-400 hover:text-indigo-300 hover:bg-slate-800'
+                                ? 'text-indigo-700 bg-slate-100'
+                                : 'text-slate-400 hover:text-indigo-700 hover:bg-slate-100'
                             }`}
                             title="Đổi tên, danh mục và màu bìa"
                           >
@@ -342,7 +342,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   onDeleteNotebook(nb.id);
                                 }
                               }}
-                              className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                              className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-slate-100 transition"
                               title="Xoá sổ tay"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -353,7 +353,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                       {/* Bảng sửa: tên, danh mục, màu bìa */}
                       {isEditing && (
-                        <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-slate-700/60 animate-pop">
+                        <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-slate-200 animate-pop">
                           <div>
                             <label className="text-[10px] font-bold text-slate-400 block mb-1">
                               Tên sổ tay
@@ -363,7 +363,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               value={nb.title}
                               onChange={(e) => onRenameNotebook(nb.id, e.target.value)}
                               onClick={(e) => e.stopPropagation()}
-                              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-indigo-500"
+                              className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-indigo-400"
                             />
                           </div>
 
@@ -375,7 +375,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               value={nb.category}
                               onChange={(e) => onChangeNotebookCategory(nb.id, e.target.value)}
                               onClick={(e) => e.stopPropagation()}
-                              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-indigo-500"
+                              className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-indigo-400"
                             >
                               {Array.from(new Set([...NOTEBOOK_CATEGORIES, nb.category])).map(c => (
                                 <option key={c} value={c}>{c}</option>
@@ -398,7 +398,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   }}
                                   className={`w-7 h-7 rounded-lg bg-gradient-to-br ${coverColor.gradient} transition hover:scale-110 ${
                                     nb.coverColor === coverColor.gradient
-                                      ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900'
+                                      ? 'ring-2 ring-white ring-offset-2 ring-offset-white'
                                       : ''
                                   }`}
                                   title={coverColor.name}
@@ -428,7 +428,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* TAB 2: TRANG — kéo thả sắp xếp, nhân bản, chuyển sổ tay */}
           {activeTab === 'pages' && (
             <div className="space-y-3">
-              <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+              <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
                 <GripVertical className="w-3 h-3" />
                 Giữ tay cầm rồi kéo để đổi thứ tự trang
               </p>
@@ -451,20 +451,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         isDragging
                           ? 'opacity-40 border-indigo-400'
                           : isDropTarget
-                            ? 'border-indigo-400 ring-2 ring-indigo-400/60 scale-[1.03]'
+                            ? 'border-indigo-400 ring-2 ring-indigo-400 scale-[1.03]'
                             : index === currentPageIndex
-                              ? 'bg-indigo-950/80 border-indigo-500 ring-2 ring-indigo-500/40'
-                              : 'glass-card border-slate-700 hover:border-slate-500'
+                              ? 'bg-indigo-50 border-indigo-400 ring-2 ring-indigo-300'
+                              : 'bg-white border border-slate-200 hover:border-slate-300 border-slate-200 hover:border-slate-300'
                       }`}
                     >
                       <PageThumbnail page={pg} width={150} />
 
-                      <div className="w-full flex items-center justify-between gap-1 text-xs px-0.5 text-slate-300">
+                      <div className="w-full flex items-center justify-between gap-1 text-xs px-0.5 text-slate-700">
                         {/* Tay cầm kéo thả */}
                         <div
                           onPointerDown={(e) => beginPageDrag(e, index)}
                           onClick={(e) => e.stopPropagation()}
-                          className="flex items-center gap-1 cursor-grab active:cursor-grabbing text-slate-400 hover:text-indigo-300 touch-none"
+                          className="flex items-center gap-1 cursor-grab active:cursor-grabbing text-slate-400 hover:text-indigo-700 touch-none"
                           title="Kéo để đổi thứ tự trang"
                         >
                           <GripVertical className="w-3.5 h-3.5" />
@@ -477,7 +477,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               e.stopPropagation();
                               onDuplicatePage(index);
                             }}
-                            className="p-1 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800 transition"
+                            className="p-1 rounded text-slate-400 hover:text-indigo-700 hover:bg-slate-100 transition"
                             title="Nhân bản trang này"
                           >
                             <CopyPlus className="w-3.5 h-3.5" />
@@ -491,8 +491,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               }}
                               className={`p-1 rounded transition ${
                                 movingPageIndex === index
-                                  ? 'text-indigo-300 bg-slate-800'
-                                  : 'text-slate-400 hover:text-indigo-300 hover:bg-slate-800'
+                                  ? 'text-indigo-700 bg-slate-100'
+                                  : 'text-slate-400 hover:text-indigo-700 hover:bg-slate-100'
                               }`}
                               title="Chuyển trang sang sổ tay khác"
                             >
@@ -506,7 +506,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 e.stopPropagation();
                                 onDeletePage(index);
                               }}
-                              className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                              className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-slate-100 transition"
                               title="Xoá trang"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -519,7 +519,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       {movingPageIndex === index && (
                         <div
                           onClick={(e) => e.stopPropagation()}
-                          className="absolute inset-x-1 bottom-9 z-20 glass-panel rounded-xl border border-slate-700 p-1.5 shadow-2xl animate-pop max-h-40 overflow-y-auto"
+                          className="absolute inset-x-1 bottom-9 z-20 chrome-bar chrome-bar-float rounded-xl border border-slate-200 p-1.5 shadow-2xl animate-pop max-h-40 overflow-y-auto"
                         >
                           <p className="text-[10px] font-bold text-slate-400 px-1.5 pb-1">
                             Chuyển sang…
@@ -533,7 +533,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   onMovePageToNotebook(index, nb.id);
                                   setMovingPageIndex(null);
                                 }}
-                                className="w-full text-left px-1.5 py-1.5 rounded-lg text-[11px] text-slate-200 hover:bg-indigo-600/30 transition truncate"
+                                className="w-full text-left px-1.5 py-1.5 rounded-lg text-[11px] text-slate-800 hover:bg-indigo-100 transition truncate"
                               >
                                 {nb.title}
                               </button>
@@ -547,7 +547,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <button
                 onClick={onAddPage}
-                className="w-full py-3 rounded-xl border border-dashed border-indigo-500/50 hover:bg-indigo-600/10 text-indigo-300 font-semibold text-xs flex items-center justify-center gap-2 transition mt-2"
+                className="w-full py-3 rounded-xl border border-dashed border-indigo-300 hover:bg-indigo-50 text-indigo-700 font-semibold text-xs flex items-center justify-center gap-2 transition mt-2"
               >
                 <Plus className="w-4 h-4" />
                 <span>Thêm Trang Mới</span>
@@ -560,8 +560,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="space-y-3">
               {/* KHỔ GIẤY */}
               <div className="space-y-2">
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
-                  <Ruler className="w-4 h-4 text-emerald-400" />
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                  <Ruler className="w-4 h-4 text-emerald-600" />
                   <span>Kích cỡ trang giấy</span>
                 </div>
 
@@ -581,15 +581,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         onClick={() => onChangePageSize(spec.id, orientationForSpec)}
                         className={`p-3 rounded-xl border transition flex items-center gap-3 text-left ${
                           isActive
-                            ? 'bg-emerald-600/25 border-emerald-500 text-white'
-                            : 'glass-card border-slate-700 text-slate-300 hover:border-slate-500'
+                            ? 'bg-emerald-600/25 border-emerald-500 text-slate-900'
+                            : 'bg-white border border-slate-200 hover:border-slate-300 border-slate-200 text-slate-700 hover:border-slate-300'
                         }`}
                       >
                         {/* Ô xem trước đúng tỉ lệ khổ giấy */}
                         <div className="w-10 h-10 flex items-center justify-center shrink-0">
                           <div
                             className={`border-2 rounded-sm ${
-                              isActive ? 'border-emerald-400 bg-emerald-400/20' : 'border-slate-500 bg-slate-700/40'
+                              isActive ? 'border-emerald-400 bg-emerald-400/20' : 'border-slate-300 bg-slate-700/40'
                             }`}
                             style={{
                               width: `${Math.max(8, displayWidth * previewScale)}px`,
@@ -603,7 +603,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           <p className="text-[11px] text-slate-400 truncate">{spec.description}</p>
                         </div>
 
-                        {isActive && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                        {isActive && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
                       </button>
                     );
                   })}
@@ -616,8 +616,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onChangePageSize(currentPaperSize, 'portrait')}
                       className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition ${
                         currentOrientation === 'portrait'
-                          ? 'bg-indigo-600 text-white border-indigo-500'
-                          : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200'
+                          ? 'bg-indigo-600 text-white border-indigo-400'
+                          : 'bg-white text-slate-400 border-slate-200 hover:text-slate-800'
                       }`}
                     >
                       <RectangleVertical className="w-4 h-4" />
@@ -627,8 +627,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onChangePageSize(currentPaperSize, 'landscape')}
                       className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition ${
                         currentOrientation === 'landscape'
-                          ? 'bg-indigo-600 text-white border-indigo-500'
-                          : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200'
+                          ? 'bg-indigo-600 text-white border-indigo-400'
+                          : 'bg-white text-slate-400 border-slate-200 hover:text-slate-800'
                       }`}
                     >
                       <RectangleHorizontal className="w-4 h-4" />
@@ -643,18 +643,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       onApplyPageSizeToNotebook(currentPaperSize, currentOrientation);
                     }
                   }}
-                  className="w-full py-2.5 rounded-xl border border-dashed border-emerald-500/50 hover:bg-emerald-600/10 text-emerald-300 font-semibold text-xs flex items-center justify-center gap-2 transition"
+                  className="w-full py-2.5 rounded-xl border border-dashed border-emerald-300 hover:bg-emerald-600/10 text-emerald-700 font-semibold text-xs flex items-center justify-center gap-2 transition"
                 >
                   <Layers2 className="w-4 h-4" />
                   <span>Áp cho toàn bộ sổ tay</span>
                 </button>
 
-                <p className="text-[11px] text-slate-500 leading-relaxed">
+                <p className="text-[11px] text-slate-400 leading-relaxed">
                   Chuyển sang khổ nhỏ hơn có thể che phần nội dung nằm ngoài trang mới — dùng Ctrl+Z để hoàn tác nếu cần.
                 </p>
               </div>
 
-              <div className="h-px bg-slate-800 my-3" />
+              <div className="h-px bg-slate-100 my-3" />
 
               <p className="text-xs text-slate-400 mb-2">Chọn mẫu giấy nền cho trang hiện tại:</p>
               <div className="grid grid-cols-1 gap-2.5">
@@ -667,14 +667,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }}
                     className={`p-3 rounded-xl border transition flex items-center gap-3 text-left ${
                       currentNotebook?.pages[currentPageIndex]?.template === tmpl.id
-                        ? 'bg-indigo-600/30 border-indigo-500 text-white font-bold'
-                        : 'glass-card border-slate-700 text-slate-300 hover:border-slate-500'
+                        ? 'bg-indigo-100 border-indigo-400 text-slate-900 font-bold'
+                        : 'bg-white border border-slate-200 hover:border-slate-300 border-slate-200 text-slate-700 hover:border-slate-300'
                     }`}
                   >
-                    <div className={`w-10 h-10 rounded-lg border border-slate-500 ${tmpl.previewClass}`} />
+                    <div className={`w-10 h-10 rounded-lg border border-slate-300 ${tmpl.previewClass}`} />
                     <span className="text-sm font-medium flex-1">{tmpl.name}</span>
                     {currentNotebook?.pages[currentPageIndex]?.template === tmpl.id && (
-                      <Check className="w-5 h-5 text-indigo-400" />
+                      <Check className="w-5 h-5 text-indigo-600" />
                     )}
                   </button>
                 ))}
@@ -687,17 +687,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {inkModelStatus === 'ready' && (
           <div className="shrink-0 px-3 pb-2">
             {indexProgress ? (
-              <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-700 space-y-2">
+              <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-200 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />
-                    <span className="text-[11px] font-bold text-slate-200 truncate">
+                    <Loader2 className="w-3.5 h-3.5 text-indigo-600 animate-spin shrink-0" />
+                    <span className="text-[11px] font-bold text-slate-800 truncate">
                       Đang đọc trang {indexProgress.done + 1}/{indexProgress.total}
                     </span>
                   </div>
                   <button
                     onClick={onStopIndexing}
-                    className="p-1 rounded text-slate-400 hover:text-rose-400 shrink-0"
+                    className="p-1 rounded text-slate-400 hover:text-rose-600 shrink-0"
                     title="Dừng đánh chỉ mục"
                   >
                     <Square className="w-3 h-3 fill-current" />
@@ -712,25 +712,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   />
                 </div>
                 {indexProgress.currentNotebook && (
-                  <p className="text-[10px] text-slate-500 truncate">{indexProgress.currentNotebook}</p>
+                  <p className="text-[10px] text-slate-400 truncate">{indexProgress.currentNotebook}</p>
                 )}
               </div>
             ) : inkIndexStats.total === 0 ? null : inkIndexStats.indexed >= inkIndexStats.total ? (
-              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/60">
-                <Search className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                <Search className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                 <p className="text-[10px] text-slate-400 leading-snug">
                   Tìm kiếm thấy cả chữ viết tay của{' '}
-                  <span className="font-bold text-slate-300">{inkIndexStats.total} trang</span>
+                  <span className="font-bold text-slate-700">{inkIndexStats.total} trang</span>
                 </p>
               </div>
             ) : (
               <button
                 onClick={onStartIndexing}
-                className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/40 hover:bg-amber-500/25 transition text-left"
+                className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-amber-50 border border-amber-300 hover:bg-amber-100 transition text-left"
               >
-                <Search className="w-4 h-4 text-amber-300 shrink-0" />
+                <Search className="w-4 h-4 text-amber-700 shrink-0" />
                 <div className="min-w-0">
-                  <p className="text-[11px] font-bold text-amber-200">
+                  <p className="text-[11px] font-bold text-amber-800">
                     Đánh chỉ mục {inkIndexStats.total - inkIndexStats.indexed} trang viết tay
                   </p>
                   <p className="text-[10px] text-slate-400 leading-snug">
@@ -745,24 +745,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* CHÂN: SAO LƯU & KHÔI PHỤC — luôn hiện ở mọi tab vì đây là thao tác
             cấp toàn bộ thư viện, không thuộc riêng sổ tay hay trang nào */}
         {/* CHÂN: NHẬN DIỆN CHỮ VIẾT TAY */}
-        <div className="shrink-0 border-t border-slate-800 px-3 pt-3 pb-1">
+        <div className="shrink-0 border-t border-slate-200 px-3 pt-3 pb-1">
           <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 px-0.5 mb-2">
-            <PenLine className="w-3.5 h-3.5 text-indigo-400" />
+            <PenLine className="w-3.5 h-3.5 text-indigo-600" />
             <span>Nhận diện chữ viết tay</span>
           </div>
 
           {inkModelStatus === 'ready' && (
-            <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-700/50">
+            <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-50 border border-emerald-300">
               <div className="flex items-center gap-2 min-w-0">
-                <WifiOff className="w-4 h-4 text-emerald-400 shrink-0" />
+                <WifiOff className="w-4 h-4 text-emerald-600 shrink-0" />
                 <div className="min-w-0">
-                  <p className="text-[11px] font-bold text-emerald-300">Chạy ngoại tuyến</p>
+                  <p className="text-[11px] font-bold text-emerald-700">Chạy ngoại tuyến</p>
                   <p className="text-[10px] text-slate-400">Mô hình tiếng Việt đã có trên máy</p>
                 </div>
               </div>
               <button
                 onClick={onDeleteInkModel}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition shrink-0"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-slate-100 transition shrink-0"
                 title="Xoá mô hình để lấy lại dung lượng"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -771,20 +771,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
 
           {inkModelStatus === 'downloading' && (
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-800/60 border border-slate-700">
-              <Loader2 className="w-4 h-4 text-indigo-400 animate-spin shrink-0" />
-              <p className="text-[11px] font-semibold text-slate-300">Đang tải mô hình tiếng Việt…</p>
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-100 border border-slate-200">
+              <Loader2 className="w-4 h-4 text-indigo-600 animate-spin shrink-0" />
+              <p className="text-[11px] font-semibold text-slate-700">Đang tải mô hình tiếng Việt…</p>
             </div>
           )}
 
           {inkModelStatus === 'missing' && (
             <button
               onClick={onDownloadInkModel}
-              className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-indigo-600/20 border border-indigo-500/50 hover:bg-indigo-600/30 transition text-left"
+              className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-indigo-50 border border-indigo-300 hover:bg-indigo-100 transition text-left"
             >
-              <Download className="w-4 h-4 text-indigo-300 shrink-0" />
+              <Download className="w-4 h-4 text-indigo-700 shrink-0" />
               <div className="min-w-0">
-                <p className="text-[11px] font-bold text-indigo-200">Tải mô hình ngoại tuyến (~20 MB)</p>
+                <p className="text-[11px] font-bold text-indigo-700">Tải mô hình ngoại tuyến (~20 MB)</p>
                 <p className="text-[10px] text-slate-400 leading-snug">
                   Nhận diện ngay trên máy, không cần mạng và nhanh hơn
                 </p>
@@ -793,8 +793,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
 
           {(inkModelStatus === 'unsupported' || inkModelStatus === 'unknown') && (
-            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/60">
-              <Wifi className="w-4 h-4 text-slate-500 shrink-0" />
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+              <Wifi className="w-4 h-4 text-slate-400 shrink-0" />
               <p className="text-[10px] text-slate-400 leading-snug">
                 Đang dùng bộ nhận diện trực tuyến. Bản ứng dụng Android tải được mô hình về
                 chạy ngoại tuyến.
@@ -803,14 +803,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        <div className="shrink-0 border-t border-slate-800 p-3 space-y-2">
+        <div className="shrink-0 border-t border-slate-200 p-3 space-y-2">
           <div
             className={`flex items-center gap-1.5 text-[11px] font-bold px-0.5 ${
               backupAge.level === 'fresh'
-                ? 'text-emerald-400'
+                ? 'text-emerald-600'
                 : backupAge.level === 'stale'
-                  ? 'text-amber-400'
-                  : 'text-rose-400'
+                  ? 'text-amber-600'
+                  : 'text-rose-600'
             }`}
           >
             {backupAge.level === 'fresh' ? (
@@ -835,15 +835,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               onClick={onRestoreBackup}
               disabled={isBackupBusy}
-              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs disabled:opacity-50 transition"
+              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-700 text-slate-800 border border-slate-200 font-bold text-xs disabled:opacity-50 transition"
               title="Chọn file .zip sao lưu để khôi phục lại sổ tay"
             >
-              <CloudDownload className="w-4 h-4 text-indigo-400" />
+              <CloudDownload className="w-4 h-4 text-indigo-600" />
               <span>Khôi phục</span>
             </button>
           </div>
 
-          <p className="text-[10px] text-slate-500 leading-relaxed">
+          <p className="text-[10px] text-slate-400 leading-relaxed">
             Dữ liệu chỉ nằm trong bộ nhớ ứng dụng — gỡ app là mất. Hãy sao lưu định kỳ và
             chọn Google Drive ở khay chia sẻ.
           </p>
@@ -852,10 +852,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* CREATE NOTEBOOK MODAL */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <form onSubmit={handleCreate} className="glass-panel w-full max-w-md rounded-2xl p-6 border border-slate-700 shadow-2xl animate-pop space-y-4">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <FolderPlus className="w-5 h-5 text-indigo-400" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md">
+          <form onSubmit={handleCreate} className="chrome-bar chrome-bar-float w-full max-w-md rounded-2xl p-6 border border-slate-200 shadow-2xl animate-pop space-y-4">
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <FolderPlus className="w-5 h-5 text-indigo-600" />
               <span>Tạo Sổ Tay Mới</span>
             </h3>
 
@@ -867,7 +867,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onChange={(e) => setNewTitle(e.target.value)}
                 placeholder="Ví dụ: Ghi Chú Học Tập Xiaomi Pad..."
                 required
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500 text-sm"
+                className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-indigo-400 text-sm"
               />
             </div>
 
@@ -876,7 +876,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <select
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500 text-sm"
+                className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-indigo-400 text-sm"
               >
                 <option value="Học Tập">Học Tập</option>
                 <option value="Công Việc">Công Việc</option>
@@ -891,7 +891,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <select
                 value={newTemplate}
                 onChange={(e) => setNewTemplate(e.target.value as PaperTemplate)}
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500 text-sm"
+                className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-indigo-400 text-sm"
               >
                 {TEMPLATES.map(t => (
                   <option key={t.id} value={t.id}>{t.name}</option>
@@ -905,7 +905,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <select
                   value={newPaperSize}
                   onChange={(e) => setNewPaperSize(e.target.value as PaperSizeId)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500 text-sm"
+                  className="w-full px-3 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-indigo-400 text-sm"
                 >
                   {PAPER_SIZES.map(s => (
                     <option key={s.id} value={s.id}>{s.name.split(' (')[0]}</option>
@@ -919,7 +919,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   value={newOrientation}
                   onChange={(e) => setNewOrientation(e.target.value as PaperOrientation)}
                   disabled={!PAPER_SIZES.find(s => s.id === newPaperSize)?.supportsOrientation}
-                  className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500 text-sm disabled:opacity-50"
+                  className="w-full px-3 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-indigo-400 text-sm disabled:opacity-50"
                 >
                   <option value="portrait">Dọc</option>
                   <option value="landscape">Ngang</option>
@@ -931,7 +931,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-semibold"
+                className="px-4 py-2 rounded-xl text-slate-400 hover:text-slate-900 text-xs font-semibold"
               >
                 Hủy
               </button>
