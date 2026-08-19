@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PenPresets, PenPreset } from '../engine/PenPresets';
+import { FloatingPanel } from './FloatingPanel';
 import {
   PenTool,
   Highlighter,
@@ -50,15 +51,21 @@ interface ToolbarProps {
   onFitPage: () => void;
 }
 
-const COLOR_SWATCHES = [
-  { name: 'Đen Mực', hex: '#1e293b' },
-  { name: 'Xanh Indigo', hex: '#4f46e5' },
-  { name: 'Xanh Dương', hex: '#2563eb' },
-  { name: 'Xanh Lá', hex: '#059669' },
-  { name: 'Đỏ Hồng', hex: '#e11d48' },
-  { name: 'Cam Amber', hex: '#d97706' },
-  { name: 'Tím Violet', hex: '#9333ea' },
-  { name: 'Trắng Neon', hex: '#ffffff' }
+/** Sáu màu hay dùng nhất, luôn hiện sẵn trên thanh công cụ */
+const QUICK_COLORS = [
+  { name: 'Đen mực', hex: '#1e293b' },
+  { name: 'Xanh chàm', hex: '#4f46e5' },
+  { name: 'Đỏ', hex: '#e11d48' },
+  { name: 'Xanh lá', hex: '#059669' },
+  { name: 'Cam', hex: '#d97706' },
+  { name: 'Trắng', hex: '#ffffff' }
+];
+
+/** Bảng màu đầy đủ trong hộp thoại — 3 hàng 8 màu */
+const PALETTE = [
+  '#000000', '#1e293b', '#475569', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f8fafc', '#ffffff',
+  '#7f1d1d', '#dc2626', '#e11d48', '#db2777', '#a21caf', '#7c3aed', '#4f46e5', '#2563eb',
+  '#0891b2', '#0d9488', '#059669', '#16a34a', '#65a30d', '#ca8a04', '#d97706', '#ea580c'
 ];
 
 const PEN_SIZES = [
@@ -107,18 +114,21 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   const [showFontPicker, setShowFontPicker] = useState(false);
   const [showColorPanel, setShowColorPanel] = useState(false);
+  const [colorAnchor, setColorAnchor] = useState<HTMLElement | null>(null);
+  const [fontAnchor, setFontAnchor] = useState<HTMLElement | null>(null);
+  const [hexDraft, setHexDraft] = useState('');
   const [presets, setPresets] = useState<PenPreset[]>(() => PenPresets.load());
   const [recentColors, setRecentColors] = useState<string[]>(() => PenPresets.loadRecentColors());
-  const colorPanelRef = useRef<HTMLDivElement | null>(null);
+  /** Ô nhập mã màu chỉ áp dụng khi gõ đủ 6 ký tự hợp lệ */
+  const commitHex = (raw: string) => {
+    const cleaned = raw.trim().replace(/^#/, '');
+    if (!/^[0-9a-fA-F]{6}$/.test(cleaned)) return;
+    applyCustomColor('#' + cleaned.toLowerCase());
+  };
 
   useEffect(() => {
-    if (!showColorPanel) return;
-    const close = (e: MouseEvent) => {
-      if (!colorPanelRef.current?.contains(e.target as Node)) setShowColorPanel(false);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [showColorPanel]);
+    if (showColorPanel) setHexDraft(color.replace('#', ''));
+  }, [showColorPanel, color]);
 
   const applyCustomColor = (hex: string) => {
     onChangeColor(hex);
@@ -136,18 +146,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   };
 
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const fontPickerRef = useRef<HTMLDivElement | null>(null);
-
-  // Bấm ra ngoài để đóng danh sách font
-  useEffect(() => {
-    if (!showFontPicker) return;
-    const handleClickOutside = (event: MouseEvent) => {
-      if (!fontPickerRef.current?.contains(event.target as Node)) setShowFontPicker(false);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showFontPicker]);
-
   // Chỉ hiện tuỳ chọn liên quan tới công cụ đang chọn — đây là điểm chính giúp
   // thanh công cụ không còn tràn xuống nhiều dòng như trước.
   const showColors = currentTool === 'pen' || currentTool === 'highlighter' || currentTool === 'text';
@@ -189,13 +187,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       {/* ---------- 2. Tuỳ chọn theo công cụ đang chọn ---------- */}
       <div className="flex-1 min-w-0 flex items-center gap-2.5 overflow-x-auto">
+        {/* Màu hiện tại — bấm để mở hộp chọn màu */}
         {showColors && (
-          <div className="chrome-group flex items-center gap-1 px-2 py-1.5 shrink-0">
-            {COLOR_SWATCHES.map(swatch => (
+          <div className="chrome-group flex items-center gap-1.5 px-2 py-1.5 shrink-0">
+            {/* Sáu màu hay dùng, đổi nhanh một chạm */}
+            {QUICK_COLORS.map(swatch => (
               <button
                 key={swatch.hex}
                 onClick={() => onChangeColor(swatch.hex)}
-                className={`w-6 h-6 rounded-full flex items-center justify-center transition transform hover:scale-110 ${
+                className={`w-6 h-6 rounded-full flex items-center justify-center transition hover:scale-110 ${
                   color === swatch.hex
                     ? 'ring-2 ring-indigo-600 ring-offset-2 ring-offset-slate-50 scale-105'
                     : 'ring-1 ring-slate-300'
@@ -213,64 +213,122 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               </button>
             ))}
 
-            {/* Màu tuỳ ý */}
-            <div className="relative" ref={colorPanelRef}>
-              <button
-                onClick={() => setShowColorPanel(!showColorPanel)}
-                className={`w-6 h-6 rounded-full flex items-center justify-center transition hover:scale-110 ${
-                  COLOR_SWATCHES.some(sw => sw.hex === color)
-                    ? 'ring-1 ring-slate-300 bg-white'
-                    : 'ring-2 ring-indigo-600 ring-offset-2 ring-offset-slate-50'
-                }`}
-                style={
-                  COLOR_SWATCHES.some(sw => sw.hex === color) ? undefined : { backgroundColor: color }
-                }
-                title="Chọn màu tuỳ ý"
-              >
-                {COLOR_SWATCHES.some(sw => sw.hex === color) && (
-                  <Pipette className="w-3.5 h-3.5 text-slate-500" />
-                )}
-              </button>
+            <div className="w-px h-5 bg-slate-200 mx-0.5" />
 
-              {showColorPanel && (
-                <div className="chrome-bar chrome-bar-float absolute top-10 left-0 w-56 rounded-2xl p-3 z-40 border animate-pop space-y-3">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1.5">
-                      Chọn màu bất kỳ
-                    </label>
-                    <input
-                      type="color"
-                      value={color}
-                      onChange={e => applyCustomColor(e.target.value)}
-                      className="w-full h-10 rounded-lg border border-slate-200 cursor-pointer bg-white"
-                    />
-                  </div>
-
-                  {recentColors.length > 0 && (
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-500 block mb-1.5">
-                        Vừa dùng
-                      </label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {recentColors.map(hex => (
-                          <button
-                            key={hex}
-                            onClick={() => applyCustomColor(hex)}
-                            className={`w-6 h-6 rounded-full transition hover:scale-110 ${
-                              color.toLowerCase() === hex ? 'ring-2 ring-indigo-600 ring-offset-1' : 'ring-1 ring-slate-300'
-                            }`}
-                            style={{ backgroundColor: hex }}
-                            title={hex}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            {/* Nút mở hộp thoại: hiện đúng màu đang dùng kèm mã màu */}
+            <button
+              ref={setColorAnchor}
+              onClick={() => setShowColorPanel(!showColorPanel)}
+              className={`flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-lg border transition ${
+                showColorPanel
+                  ? 'bg-indigo-50 border-indigo-300'
+                  : 'bg-white border-slate-200 hover:border-indigo-300'
+              }`}
+              title="Mở hộp chọn màu đầy đủ"
+            >
+              <span
+                className="w-6 h-6 rounded-md ring-1 ring-slate-300 shrink-0"
+                style={{ backgroundColor: color }}
+              />
+              <span className="text-[10px] font-bold text-slate-500 uppercase tabular-nums hidden xl:inline">
+                {color.replace('#', '')}
+              </span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
           </div>
         )}
+
+        {/* HỘP CHỌN MÀU — render qua portal nên không bị thanh công cụ cắt */}
+        <FloatingPanel
+          anchor={colorAnchor}
+          open={showColorPanel}
+          onClose={() => setShowColorPanel(false)}
+          width={296}
+        >
+          <div className="p-4 space-y-4">
+            {/* Xem trước màu đang chọn */}
+            <div className="flex items-center gap-3">
+              <span
+                className="w-12 h-12 rounded-xl ring-1 ring-slate-300 shrink-0 shadow-inner"
+                style={{ backgroundColor: color }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold text-slate-500 mb-1">Mã màu</p>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm font-bold text-slate-400">#</span>
+                  <input
+                    value={hexDraft}
+                    onChange={e => {
+                      setHexDraft(e.target.value);
+                      commitHex(e.target.value);
+                    }}
+                    maxLength={6}
+                    spellCheck={false}
+                    className="w-24 px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-sm font-bold text-slate-800 uppercase tabular-nums focus:outline-none focus:border-indigo-400"
+                    placeholder="4F46E5"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Bảng màu đầy đủ */}
+            <div>
+              <p className="text-[11px] font-bold text-slate-500 mb-2">Bảng màu</p>
+              <div className="grid grid-cols-8 gap-2">
+                {PALETTE.map(hex => (
+                  <button
+                    key={hex}
+                    onClick={() => applyCustomColor(hex)}
+                    className={`w-7 h-7 rounded-lg transition hover:scale-110 ${
+                      color.toLowerCase() === hex
+                        ? 'ring-2 ring-indigo-600 ring-offset-2 ring-offset-white'
+                        : 'ring-1 ring-slate-300'
+                    }`}
+                    style={{ backgroundColor: hex }}
+                    title={hex}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Màu vừa dùng */}
+            {recentColors.length > 0 && (
+              <div>
+                <p className="text-[11px] font-bold text-slate-500 mb-2">Vừa dùng</p>
+                <div className="flex flex-wrap gap-2">
+                  {recentColors.map(hex => (
+                    <button
+                      key={hex}
+                      onClick={() => applyCustomColor(hex)}
+                      className={`w-7 h-7 rounded-lg transition hover:scale-110 ${
+                        color.toLowerCase() === hex
+                          ? 'ring-2 ring-indigo-600 ring-offset-2 ring-offset-white'
+                          : 'ring-1 ring-slate-300'
+                      }`}
+                      style={{ backgroundColor: hex }}
+                      title={hex}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Bộ chọn màu của hệ thống */}
+            <div>
+              <p className="text-[11px] font-bold text-slate-500 mb-2">Chọn màu bất kỳ</p>
+              <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:border-indigo-300 transition cursor-pointer">
+                <Pipette className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span className="text-xs font-bold text-slate-700 flex-1">Mở bảng màu hệ thống</span>
+                <input
+                  type="color"
+                  value={color}
+                  onChange={e => applyCustomColor(e.target.value)}
+                  className="w-9 h-7 rounded cursor-pointer border border-slate-200 bg-white"
+                />
+              </label>
+            </div>
+          </div>
+        </FloatingPanel>
 
         {/* Bút yêu thích */}
         <div className="chrome-group flex items-center gap-1 px-1.5 py-1 shrink-0">
@@ -384,47 +442,57 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         )}
 
         {showFonts && (
-          <div className="relative shrink-0" ref={fontPickerRef}>
-            <button
-              onClick={() => setShowFontPicker(!showFontPicker)}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white text-slate-700 border border-slate-200 text-xs font-bold hover:border-indigo-300 hover:text-indigo-700 transition"
-            >
-              <span className="truncate max-w-[120px]" style={{ fontFamily }}>
-                {VIETNAMESE_HANDWRITING_FONTS.find(f => f.family === fontFamily)?.name.split(' (')[0] || 'Font'}
-              </span>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-            </button>
-
-            {showFontPicker && (
-              <div className="chrome-bar chrome-bar-float absolute top-12 left-0 w-72 rounded-2xl p-1.5 z-40 border animate-pop">
-                <div className="text-[11px] font-bold text-slate-500 px-2.5 py-1.5">
-                  Font chữ viết tay Tiếng Việt
-                </div>
-                <div className="space-y-0.5">
-                  {VIETNAMESE_HANDWRITING_FONTS.map(font => (
-                    <button
-                      key={font.family}
-                      onClick={() => {
-                        onChangeFontFamily(font.family);
-                        setShowFontPicker(false);
-                      }}
-                      className={`w-full text-left px-2.5 py-2 rounded-xl transition flex flex-col ${
-                        fontFamily === font.family
-                          ? 'bg-indigo-50 text-indigo-800 ring-1 ring-indigo-200'
-                          : 'hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      <span className="text-[11px] font-bold text-slate-500">{font.name.split(' (')[0]}</span>
-                      <span className="text-lg truncate leading-tight" style={{ fontFamily: font.family }}>
-                        {font.previewText}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <button
+            ref={setFontAnchor}
+            onClick={() => setShowFontPicker(!showFontPicker)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition shrink-0 ${
+              showFontPicker
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:text-indigo-700'
+            }`}
+            title="Đổi font cho khung chữ mới"
+          >
+            <span className="truncate max-w-[120px]" style={{ fontFamily }}>
+              {VIETNAMESE_HANDWRITING_FONTS.find(f => f.family === fontFamily)?.name.split(' (')[0] || 'Font'}
+            </span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          </button>
         )}
+
+        {/* DANH SÁCH FONT — cũng phải dùng portal vì dính đúng lỗi cắt như hộp màu */}
+        <FloatingPanel
+          anchor={fontAnchor}
+          open={showFontPicker}
+          onClose={() => setShowFontPicker(false)}
+          width={288}
+        >
+          <div className="p-1.5">
+            <div className="text-[11px] font-bold text-slate-500 px-2.5 py-1.5">
+              Font chữ viết tay Tiếng Việt
+            </div>
+            <div className="space-y-0.5">
+              {VIETNAMESE_HANDWRITING_FONTS.map(font => (
+                <button
+                  key={font.family}
+                  onClick={() => {
+                    onChangeFontFamily(font.family);
+                    setShowFontPicker(false);
+                  }}
+                  className={`w-full text-left px-2.5 py-2 rounded-xl transition flex flex-col ${
+                    fontFamily === font.family
+                      ? 'bg-indigo-50 text-indigo-800 ring-1 ring-indigo-200'
+                      : 'hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <span className="text-[11px] font-bold text-slate-500">{font.name.split(' (')[0]}</span>
+                  <span className="text-lg truncate leading-tight" style={{ fontFamily: font.family }}>
+                    {font.previewText}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </FloatingPanel>
 
         {currentTool === 'lasso' && (
           <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium shrink-0">

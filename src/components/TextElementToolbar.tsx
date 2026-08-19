@@ -13,6 +13,7 @@ import {
   ListChecks
 } from 'lucide-react';
 import { TextElement, TextAlign, VIETNAMESE_HANDWRITING_FONTS } from '../types/notebook';
+import { FloatingPanel } from './FloatingPanel';
 
 interface TextElementToolbarProps {
   element: TextElement;
@@ -26,8 +27,8 @@ interface TextElementToolbarProps {
 }
 
 const TEXT_COLORS = [
-  '#1e293b', '#4f46e5', '#2563eb', '#059669',
-  '#e11d48', '#d97706', '#9333ea', '#ffffff'
+  '#000000', '#1e293b', '#475569', '#94a3b8', '#e11d48', '#db2777',
+  '#9333ea', '#4f46e5', '#2563eb', '#059669', '#d97706', '#ffffff'
 ];
 
 const ALIGNMENTS: { value: TextAlign; icon: React.ElementType; label: string }[] = [
@@ -54,15 +55,8 @@ export const TextElementToolbar: React.FC<TextElementToolbarProps> = ({
 }) => {
   const [openPanel, setOpenPanel] = useState<'font' | 'color' | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!openPanel) return;
-    const close = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpenPanel(null);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [openPanel]);
+  const [fontAnchor, setFontAnchor] = useState<HTMLElement | null>(null);
+  const [colorAnchor, setColorAnchor] = useState<HTMLElement | null>(null);
 
   const currentAlign: TextAlign = element.textAlign ?? 'left';
   const fontLabel =
@@ -85,8 +79,9 @@ export const TextElementToolbar: React.FC<TextElementToolbarProps> = ({
       <div className="h-4 w-px bg-slate-200" />
 
       {/* Chọn font */}
-      <div className="relative">
+      <div>
         <button
+          ref={setFontAnchor}
           onClick={() => setOpenPanel(openPanel === 'font' ? null : 'font')}
           className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-slate-100 text-[11px] font-bold text-slate-700 transition"
           title="Đổi font chữ của khung này"
@@ -97,8 +92,13 @@ export const TextElementToolbar: React.FC<TextElementToolbarProps> = ({
           <ChevronDown className="w-3 h-3 text-slate-400" />
         </button>
 
-        {openPanel === 'font' && (
-          <div className="chrome-bar chrome-bar-float absolute top-9 left-0 w-64 rounded-xl p-1.5 border z-40 animate-pop">
+        <FloatingPanel
+          anchor={fontAnchor}
+          open={openPanel === 'font'}
+          onClose={() => setOpenPanel(null)}
+          width={264}
+        >
+          <div className="p-1.5">
             {VIETNAMESE_HANDWRITING_FONTS.map(font => (
               <button
                 key={font.family}
@@ -121,7 +121,7 @@ export const TextElementToolbar: React.FC<TextElementToolbarProps> = ({
               </button>
             ))}
           </div>
-        )}
+        </FloatingPanel>
       </div>
 
       <div className="h-4 w-px bg-slate-200" />
@@ -168,8 +168,9 @@ export const TextElementToolbar: React.FC<TextElementToolbarProps> = ({
       <div className="h-4 w-px bg-slate-200" />
 
       {/* Màu chữ */}
-      <div className="relative">
+      <div>
         <button
+          ref={setColorAnchor}
           onClick={() => setOpenPanel(openPanel === 'color' ? null : 'color')}
           className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-slate-100 transition"
           title="Đổi màu chữ"
@@ -180,23 +181,45 @@ export const TextElementToolbar: React.FC<TextElementToolbarProps> = ({
           />
         </button>
 
-        {openPanel === 'color' && (
-          <div className="chrome-bar chrome-bar-float absolute top-9 right-0 rounded-xl p-2 border z-40 animate-pop grid grid-cols-4 gap-1.5">
-            {TEXT_COLORS.map(hex => (
-              <button
-                key={hex}
-                onClick={() => {
-                  onPatch({ color: hex });
-                  setOpenPanel(null);
-                }}
-                className={`w-6 h-6 rounded-full transition hover:scale-110 ${
-                  element.color === hex ? 'ring-2 ring-indigo-600 ring-offset-1' : 'ring-1 ring-slate-300'
-                }`}
-                style={{ backgroundColor: hex }}
+        <FloatingPanel
+          anchor={colorAnchor}
+          open={openPanel === 'color'}
+          onClose={() => setOpenPanel(null)}
+          width={232}
+          align="right"
+        >
+          <div className="p-3 space-y-2.5">
+            <p className="text-[11px] font-bold text-slate-500">Màu chữ</p>
+            <div className="grid grid-cols-6 gap-2">
+              {TEXT_COLORS.map(hex => (
+                <button
+                  key={hex}
+                  onClick={() => {
+                    onPatch({ color: hex });
+                    setOpenPanel(null);
+                  }}
+                  className={`w-7 h-7 rounded-lg transition hover:scale-110 ${
+                    element.color === hex
+                      ? 'ring-2 ring-indigo-600 ring-offset-2 ring-offset-white'
+                      : 'ring-1 ring-slate-300'
+                  }`}
+                  style={{ backgroundColor: hex }}
+                  title={hex}
+                />
+              ))}
+            </div>
+
+            <label className="flex items-center gap-2 px-2.5 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:border-indigo-300 transition cursor-pointer">
+              <span className="text-[11px] font-bold text-slate-700 flex-1">Màu bất kỳ</span>
+              <input
+                type="color"
+                value={element.color}
+                onChange={e => onPatch({ color: e.target.value })}
+                className="w-9 h-7 rounded cursor-pointer border border-slate-200 bg-white"
               />
-            ))}
+            </label>
           </div>
-        )}
+        </FloatingPanel>
       </div>
 
       <div className="h-4 w-px bg-slate-200" />
