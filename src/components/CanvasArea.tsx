@@ -29,7 +29,9 @@ import {
   MousePointerClick,
   AudioLines,
   PenLine,
-  Shapes
+  Shapes,
+  ScanText,
+  Loader2
 } from 'lucide-react';
 
 interface CanvasAreaProps {
@@ -39,6 +41,8 @@ interface CanvasAreaProps {
   size: number;
   fontFamily: string;
   smartShapeEnabled: boolean;
+  /** Kẻ thẳng: nét bút được nắn thành đoạn thẳng ngay khi vẽ */
+  rulerEnabled: boolean;
   palmRejectionActive: boolean;
   zoomLevel: number;
   /** `coalesceKey` gộp một chuỗi thao tác liên tục thành 1 bước hoàn tác */
@@ -62,6 +66,9 @@ interface CanvasAreaProps {
   onCopySelection: (payload: ClipboardPayload) => void;
   readClipboard: () => ClipboardPayload | null;
   hasClipboard: boolean;
+  /** Đọc chữ trong ảnh đã chèn */
+  onOcrImage: (imageId: string) => void;
+  ocrBusyImageId: string | null;
 }
 
 /** Cửa sổ thời gian (giây) quanh mốc đang phát để làm sáng nét vẽ */
@@ -78,6 +85,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   size,
   fontFamily,
   smartShapeEnabled,
+  rulerEnabled,
   palmRejectionActive,
   zoomLevel,
   onPageUpdate,
@@ -92,7 +100,9 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   fitRequest,
   onCopySelection,
   readClipboard,
-  hasClipboard
+  hasClipboard,
+  onOcrImage,
+  ocrBusyImageId
 }) => {
   /** Lớp tĩnh: nét đã lưu — chỉ vẽ lại khi tập nét thay đổi */
   const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -178,6 +188,9 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [pendingBbox, setPendingBbox] = useState<{ x: number; y: number; width: number; height: number }>({ x: 0, y: 0, width: 300, height: 80 });
   const [pendingError, setPendingError] = useState<string | null>(null);
   const [isRecognizingSelection, setIsRecognizingSelection] = useState(false);
+
+  /** Tham chiếu tới từng textarea, cần để biết con trỏ đang đặt ở dòng nào */
+  const textareaRefs = useRef<Map<string, HTMLTextAreaElement>>(new Map());
 
   const shapeHoldTimer = useRef<NodeJS.Timeout | null>(null);
   const shapeHintTimer = useRef<NodeJS.Timeout | null>(null);
@@ -569,7 +582,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       setCurrentStroke([pt]);
       currentStrokeRef.current = [pt];
 
-      if (smartShapeEnabled) {
+      if (smartShapeEnabled && !rulerEnabled) {
         if (shapeHoldTimer.current) clearTimeout(shapeHoldTimer.current);
         shapeHoldTimer.current = setTimeout(triggerShapeSmooth, 500);
       }
@@ -706,9 +719,21 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       // Nét đã được nắn thành hình chuẩn thì giữ nguyên cho tới khi nhấc bút
       if (shapeSnappedRef.current) return;
 
+      // Chế độ kẻ thẳng: nét luôn chỉ gồm điểm đầu và điểm hiện tại, nên người
+      // dùng thấy ngay đoạn thẳng sẽ ra thay vì đường tay run
+      if (rulerEnabled) {
+        setCurrentStroke(prev => {
+          const start = prev[0] ?? pt;
+          const next = [start, snapToAxis(start, pt)];
+          currentStrokeRef.current = next;
+          return next;
+        });
+        return;
+      }
+
       setCurrentStroke(prev => [...prev, pt]);
 
-      if (smartShapeEnabled && shapeHoldTimer.current) {
+      if (smartShapeEnabled && !rulerEnabled && shapeHoldTimer.current) {
         clearTimeout(shapeHoldTimer.current);
         // Hẹn lại sau mỗi lần bút dịch chuyển: chỉ khi bút ĐỨNG YÊN đủ lâu thì
         // bộ đếm mới bắn được.
@@ -964,6 +989,54 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
         gestureKeyRef.current
       );
     }
+  };
+
+  /**
+   * Bắt về phương ngang hoặc dọc khi nét đã gần đúng (lệch dưới ~8°).
+   * Kẻ bảng biểu bằng tay gần như không bao giờ thẳng tuyệt đối được.
+   */
+  const snapToAxis = (start: Point, end: Point): Point => {
+    const dx = Math.abs(end.x - start.x);
+    const dy = Math.abs(end.y - start.y);
+    if (dy < dx * 0.14) return { ...end, y: start.y };
+    if (dx < dy * 0.14) return { ...end, x: start.x };
+    return end;
+  };
+
+  /**
+   * Xoay vòng ô chọn ở dòng đang đặt con trỏ: không có → ☐ → ☑ → không có.
+   *
+   * Dùng ký tự thay vì một loại phần tử riêng để danh sách việc vẫn là chữ
+   * thuần — tìm kiếm, xuất file và sao lưu không cần biết gì thêm.
+   */
+  const toggleCheckboxOnCaretLine = (element: TextElement) => {
+    const textarea = textareaRefs.current.get(element.id);
+    const caret = textarea?.selectionStart ?? element.text.length;
+    const text = element.text;
+
+    const lineStart = text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+    const foundEnd = text.indexOf('\n', lineStart);
+    const lineEnd = foundEnd < 0 ? text.length : foundEnd;
+    const line = text.slice(lineStart, lineEnd);
+
+    let nextLine: string;
+    if (line.startsWith('☑ ')) nextLine = line.slice(2);
+    else if (line.startsWith('☐ ')) nextLine = '☑ ' + line.slice(2);
+    else nextLine = '☐ ' + line;
+
+    const nextText = text.slice(0, lineStart) + nextLine + text.slice(lineEnd);
+    const updated = page.textElements.map(t =>
+      t.id === element.id ? { ...t, text: nextText } : t
+    );
+    onPageUpdate({ ...page, textElements: updated });
+
+    // Giữ con trỏ ở đúng dòng vừa sửa
+    requestAnimationFrame(() => {
+      const shift = nextLine.length - line.length;
+      const position = Math.max(lineStart, caret + shift);
+      textarea?.focus();
+      textarea?.setSelectionRange(position, position);
+    });
   };
 
   /** Tìm nét vẽ gần điểm chạm nhất mà có mốc thời gian ghi âm */
@@ -1472,6 +1545,22 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
                   {/* Thanh công cụ ảnh */}
                   <div className="chrome-bar chrome-bar-float absolute -top-12 left-6 px-1.5 py-1 rounded-xl flex items-center gap-0.5 pointer-events-auto border animate-pop">
                     <button
+                      onClick={() => onOcrImage(img.id)}
+                      disabled={ocrBusyImageId === img.id}
+                      className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-bold bg-white text-emerald-700 border border-slate-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition disabled:opacity-60"
+                      title="Đọc chữ trong ảnh này thành khung chữ sửa được"
+                    >
+                      {ocrBusyImageId === img.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <ScanText className="w-3.5 h-3.5" />
+                      )}
+                      <span className="hidden sm:inline">Đọc chữ</span>
+                    </button>
+
+                    <div className="h-4 w-px bg-slate-200 mx-0.5" />
+
+                    <button
                       onClick={() => updateImage({ rotation: ((img.rotation || 0) - 90 + 360) % 360 }, `rotate-${img.id}`)}
                       className="chrome-btn w-7 h-7"
                       title="Xoay trái 90°"
@@ -1572,6 +1661,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
                     setDragOffset({ x: local.x - txt.x, y: local.y - txt.y });
                   }}
                   onRequestInkInput={() => onRequestInkInput(txt.id)}
+                  onToggleCheckbox={() => toggleCheckboxOnCaretLine(txt)}
                   onDelete={() => {
                     onPageUpdate({
                       ...page,
@@ -1584,6 +1674,10 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
               {/* Editable Text Area */}
               <textarea
+                ref={el => {
+                  if (el) textareaRefs.current.set(txt.id, el);
+                  else textareaRefs.current.delete(txt.id);
+                }}
                 value={txt.text}
                 onChange={(e) => {
                   const updated = page.textElements.map(t => t.id === txt.id ? { ...t, text: e.target.value } : t);

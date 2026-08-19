@@ -13,7 +13,8 @@ import {
   Search,
   ImagePlus,
   AudioLines,
-  Loader2
+  Loader2,
+  ScanLine
 } from 'lucide-react';
 import { Notebook } from '../types/notebook';
 
@@ -37,6 +38,8 @@ interface HeaderBarProps {
   onRedo: () => void;
   onOpenSearch: () => void;
   onInsertImage: () => void;
+  onScanDocument: () => void;
+  isScanning: boolean;
   isImportingPdf: boolean;
   audioNoteCount: number;
   audioBarOpen: boolean;
@@ -69,6 +72,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onRedo,
   onOpenSearch,
   onInsertImage,
+  onScanDocument,
+  isScanning,
   isImportingPdf,
   audioNoteCount,
   audioBarOpen,
@@ -210,7 +215,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         <div className="relative" ref={insertMenuRef}>
           <button
             onClick={() => setShowInsertMenu(!showInsertMenu)}
-            disabled={isImportingPdf}
+            disabled={isImportingPdf || isScanning}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition ${
               showInsertMenu
                 ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
@@ -218,7 +223,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             } disabled:opacity-60`}
             title="Chèn ảnh hoặc tài liệu PDF"
           >
-            {isImportingPdf ? <Loader2 className="w-4 h-4 animate-spin text-blue-500" /> : <Plus className="w-4 h-4 text-indigo-600" />}
+            {isImportingPdf || isScanning ? <Loader2 className="w-4 h-4 animate-spin text-blue-500" /> : <Plus className="w-4 h-4 text-indigo-600" />}
             <span className="hidden lg:inline">Chèn</span>
           </button>
 
@@ -237,6 +242,22 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-slate-800">Chèn ảnh</p>
                   <p className="text-[11px] text-slate-500">Từ thư viện hoặc camera</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowInsertMenu(false);
+                  onScanDocument();
+                }}
+                className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl hover:bg-slate-50 transition text-left"
+              >
+                <div className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700 shrink-0">
+                  <ScanLine className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-800">Quét tài liệu</p>
+                  <p className="text-[11px] text-slate-500">Tự cắt viền và nắn thẳng trang giấy</p>
                 </div>
               </button>
 

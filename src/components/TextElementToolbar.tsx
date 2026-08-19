@@ -9,7 +9,8 @@ import {
   AlignCenter,
   AlignRight,
   ChevronDown,
-  Check
+  Check,
+  ListChecks
 } from 'lucide-react';
 import { TextElement, TextAlign, VIETNAMESE_HANDWRITING_FONTS } from '../types/notebook';
 
@@ -19,6 +20,8 @@ interface TextElementToolbarProps {
   onPatch: (patch: Partial<TextElement>, coalesceKey?: string) => void;
   onStartDrag: (e: React.PointerEvent) => void;
   onRequestInkInput: () => void;
+  /** Bật/tắt ô chọn ở dòng đang đặt con trỏ */
+  onToggleCheckbox: () => void;
   onDelete: () => void;
 }
 
@@ -46,6 +49,7 @@ export const TextElementToolbar: React.FC<TextElementToolbarProps> = ({
   onPatch,
   onStartDrag,
   onRequestInkInput,
+  onToggleCheckbox,
   onDelete
 }) => {
   const [openPanel, setOpenPanel] = useState<'font' | 'color' | null>(null);
@@ -194,6 +198,17 @@ export const TextElementToolbar: React.FC<TextElementToolbarProps> = ({
           </div>
         )}
       </div>
+
+      <div className="h-4 w-px bg-slate-200" />
+
+      {/* Ô chọn việc cần làm */}
+      <button
+        onClick={onToggleCheckbox}
+        className="chrome-btn w-7 h-7"
+        title="Thêm / tick ô chọn ở dòng đang đặt con trỏ"
+      >
+        <ListChecks className="w-3.5 h-3.5" />
+      </button>
 
       <div className="h-4 w-px bg-slate-200" />
 

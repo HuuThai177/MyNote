@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { PenPresets, PenPreset } from '../engine/PenPresets';
 import {
   PenTool,
   Highlighter,
@@ -15,7 +16,12 @@ import {
   ZoomOut,
   StretchHorizontal,
   Scan,
-  MousePointer2
+  MousePointer2,
+  Pipette,
+  Star,
+  Plus,
+  X,
+  Ruler
 } from 'lucide-react';
 import { ToolType, VIETNAMESE_HANDWRITING_FONTS } from '../types/notebook';
 
@@ -30,6 +36,9 @@ interface ToolbarProps {
   onChangeFontFamily: (font: string) => void;
   smartShapeEnabled: boolean;
   onToggleSmartShape: () => void;
+  /** Kẻ thẳng: mọi nét bút được nắn thành đoạn thẳng */
+  rulerEnabled: boolean;
+  onToggleRuler: () => void;
   // Điều khiển khung nhìn (chuyển từ header sang đây cho đúng nhóm chức năng)
   palmRejectionActive: boolean;
   onTogglePalmRejection: () => void;
@@ -85,6 +94,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onChangeFontFamily,
   smartShapeEnabled,
   onToggleSmartShape,
+  rulerEnabled,
+  onToggleRuler,
   palmRejectionActive,
   onTogglePalmRejection,
   zoomLevel,
@@ -95,6 +106,35 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onFitPage
 }) => {
   const [showFontPicker, setShowFontPicker] = useState(false);
+  const [showColorPanel, setShowColorPanel] = useState(false);
+  const [presets, setPresets] = useState<PenPreset[]>(() => PenPresets.load());
+  const [recentColors, setRecentColors] = useState<string[]>(() => PenPresets.loadRecentColors());
+  const colorPanelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!showColorPanel) return;
+    const close = (e: MouseEvent) => {
+      if (!colorPanelRef.current?.contains(e.target as Node)) setShowColorPanel(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [showColorPanel]);
+
+  const applyCustomColor = (hex: string) => {
+    onChangeColor(hex);
+    setRecentColors(prev => PenPresets.pushRecentColor(prev, hex));
+  };
+
+  const applyPreset = (preset: PenPreset) => {
+    onSelectTool(preset.tool);
+    onChangeColor(preset.color);
+    onChangeSize(preset.size);
+  };
+
+  const savePreset = () => {
+    setPresets(prev => PenPresets.add(prev, { tool: currentTool, color, size }));
+  };
+
   const [isCollapsed, setIsCollapsed] = useState(false);
   const fontPickerRef = useRef<HTMLDivElement | null>(null);
 
@@ -172,8 +212,108 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 )}
               </button>
             ))}
+
+            {/* Màu tuỳ ý */}
+            <div className="relative" ref={colorPanelRef}>
+              <button
+                onClick={() => setShowColorPanel(!showColorPanel)}
+                className={`w-6 h-6 rounded-full flex items-center justify-center transition hover:scale-110 ${
+                  COLOR_SWATCHES.some(sw => sw.hex === color)
+                    ? 'ring-1 ring-slate-300 bg-white'
+                    : 'ring-2 ring-indigo-600 ring-offset-2 ring-offset-slate-50'
+                }`}
+                style={
+                  COLOR_SWATCHES.some(sw => sw.hex === color) ? undefined : { backgroundColor: color }
+                }
+                title="Chọn màu tuỳ ý"
+              >
+                {COLOR_SWATCHES.some(sw => sw.hex === color) && (
+                  <Pipette className="w-3.5 h-3.5 text-slate-500" />
+                )}
+              </button>
+
+              {showColorPanel && (
+                <div className="chrome-bar chrome-bar-float absolute top-10 left-0 w-56 rounded-2xl p-3 z-40 border animate-pop space-y-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1.5">
+                      Chọn màu bất kỳ
+                    </label>
+                    <input
+                      type="color"
+                      value={color}
+                      onChange={e => applyCustomColor(e.target.value)}
+                      className="w-full h-10 rounded-lg border border-slate-200 cursor-pointer bg-white"
+                    />
+                  </div>
+
+                  {recentColors.length > 0 && (
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 block mb-1.5">
+                        Vừa dùng
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {recentColors.map(hex => (
+                          <button
+                            key={hex}
+                            onClick={() => applyCustomColor(hex)}
+                            className={`w-6 h-6 rounded-full transition hover:scale-110 ${
+                              color.toLowerCase() === hex ? 'ring-2 ring-indigo-600 ring-offset-1' : 'ring-1 ring-slate-300'
+                            }`}
+                            style={{ backgroundColor: hex }}
+                            title={hex}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
+
+        {/* Bút yêu thích */}
+        <div className="chrome-group flex items-center gap-1 px-1.5 py-1 shrink-0">
+          <Star className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+          {presets.map(preset => {
+            const isActive =
+              preset.tool === currentTool && preset.color === color && preset.size === size;
+            return (
+              <div key={preset.id} className="relative group">
+                <button
+                  onClick={() => applyPreset(preset)}
+                  className={`w-6 h-6 rounded-md flex items-center justify-center transition hover:scale-110 ${
+                    isActive ? 'ring-2 ring-indigo-600 ring-offset-1 ring-offset-slate-50' : 'ring-1 ring-slate-300'
+                  }`}
+                  style={{ backgroundColor: preset.color }}
+                  title={`${preset.tool === 'highlighter' ? 'Dạ quang' : 'Bút'} · ${preset.size}`}
+                >
+                  <span
+                    className="rounded-full bg-white/70"
+                    style={{
+                      width: `${Math.min(12, Math.max(3, preset.size / 2))}px`,
+                      height: `${Math.min(12, Math.max(3, preset.size / 2))}px`
+                    }}
+                  />
+                </button>
+                <button
+                  onClick={() => setPresets(prev => PenPresets.remove(prev, preset.id))}
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-slate-700 text-white items-center justify-center hidden group-hover:flex"
+                  title="Bỏ bút này"
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </div>
+            );
+          })}
+          <button
+            onClick={savePreset}
+            className="w-6 h-6 rounded-md border border-dashed border-slate-300 text-slate-400 hover:text-indigo-600 hover:border-indigo-400 flex items-center justify-center transition"
+            title="Lưu bút hiện tại vào danh sách yêu thích"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
 
         {showPenSizes && (
           <div className="chrome-group flex items-center gap-0.5 p-1 shrink-0">
@@ -225,6 +365,21 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           >
             <Shapes className={`w-4 h-4 ${smartShapeEnabled ? 'text-purple-600' : 'text-slate-400'}`} />
             <span className="hidden lg:inline">Nắn hình</span>
+          </button>
+        )}
+
+        {showPenSizes && (
+          <button
+            onClick={onToggleRuler}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition shrink-0 ${
+              rulerEnabled
+                ? 'bg-sky-50 text-sky-700 border-sky-300'
+                : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'
+            }`}
+            title="Mọi nét vẽ được nắn thành đoạn thẳng, tự bắt ngang và dọc"
+          >
+            <Ruler className={`w-4 h-4 ${rulerEnabled ? 'text-sky-600' : 'text-slate-400'}`} />
+            <span className="hidden lg:inline">Kẻ thẳng</span>
           </button>
         )}
 

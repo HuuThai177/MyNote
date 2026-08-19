@@ -7,6 +7,7 @@ import {
   PaperTemplate,
   AudioNote,
   ImageElement,
+  TextElement,
   PaperSizeId,
   PaperOrientation,
   MIN_ZOOM,
@@ -18,6 +19,7 @@ import { clampZoom, getPageSizeLabel } from './engine/PageGeometry';
 import { PageOps, ClipboardPayload } from './engine/PageOps';
 import { InkRecognitionService, ModelStatus, MODEL_SIZE_LABEL } from './engine/InkRecognitionService';
 import { InkIndexer, IndexProgress } from './engine/InkIndexer';
+import { DocumentCapture } from './engine/DocumentCapture';
 import { StorageEngine, SaveResult } from './engine/StorageEngine';
 import { AudioSyncEngine } from './engine/AudioSyncEngine';
 import { HistoryEngine } from './engine/HistoryEngine';
@@ -51,6 +53,7 @@ export const App: React.FC = () => {
   const [size, setSize] = useState<number>(4);
   const [fontFamily, setFontFamily] = useState<string>("'Caveat', cursive");
   const [smartShapeEnabled, setSmartShapeEnabled] = useState<boolean>(true);
+  const [rulerEnabled, setRulerEnabled] = useState<boolean>(false);
   const [palmRejectionActive, setPalmRejectionActive] = useState<boolean>(true);
 
   // Khung nhìn trang giấy
@@ -889,6 +892,143 @@ export const App: React.FC = () => {
   }, [currentPage?.id, currentPage?.textElements, inkInputTargetId]);
 
   // ---------------------------------------------------------------------------
+  // OCR ảnh & quét tài liệu
+  // ---------------------------------------------------------------------------
+  const [ocrBusyImageId, setOcrBusyImageId] = useState<string | null>(null);
+  const [scannerBusy, setScannerBusy] = useState(false);
+
+  /** Đọc chữ trong một ảnh đã chèn, chèn kết quả thành khung chữ bên dưới ảnh */
+  const handleOcrImage = async (imageId: string) => {
+    const page = readCurrentPage();
+    const image = page?.imageElements.find(i => i.id === imageId);
+    if (!page || !image) return;
+
+    if (!image.assetId) {
+      setToast({ type: 'error', message: 'Ảnh này không còn dữ liệu gốc để đọc chữ.' });
+      return;
+    }
+
+    setOcrBusyImageId(imageId);
+    try {
+      const asset = await StorageEngine.getAsset(image.assetId);
+      if (!asset?.blob) throw new Error('Không tìm thấy dữ liệu ảnh');
+
+      const result = await DocumentCapture.recognizeTextInBlob(asset.blob);
+
+      if (!result.text) {
+        setToast({ type: 'error', message: 'Không đọc được chữ nào trong ảnh này.' });
+        return;
+      }
+
+      const newText: TextElement = {
+        id: `t-ocr-${Date.now()}`,
+        x: image.x,
+        y: image.y + image.height + 16,
+        width: Math.max(320, image.width),
+        height: Math.max(80, result.lineCount * 30 + 24),
+        text: result.text,
+        fontFamily: "'Comfortaa', sans-serif",
+        fontSize: 20,
+        color: '#1e293b',
+        textAlign: 'left'
+      };
+
+      const latest = readCurrentPage();
+      if (!latest) return;
+      applyPageUpdate({ ...latest, textElements: [...latest.textElements, newText] });
+
+      setToast({
+        type: 'info',
+        message: `Đã đọc ${result.lineCount} dòng chữ từ ảnh. Khung chữ mới nằm ngay dưới ảnh, sửa được.`
+      });
+    } catch (e: any) {
+      setToast({ type: 'error', message: e?.message || 'Đọc chữ từ ảnh thất bại.' });
+    } finally {
+      setOcrBusyImageId(null);
+    }
+  };
+
+  /** Quét tài liệu bằng camera: mỗi trang quét thành một trang ghi chú */
+  const handleScanDocument = async () => {
+    if (scannerBusy) return;
+
+    if (!(await DocumentCapture.isScannerAvailable())) {
+      setToast({
+        type: 'error',
+        message: 'Quét tài liệu chỉ có trên bản ứng dụng Android.'
+      });
+      return;
+    }
+
+    setScannerBusy(true);
+    try {
+      setToast({ type: 'info', message: 'Đang chuẩn bị bộ quét của Google…' });
+      const ready = await DocumentCapture.ensureScannerModule();
+      if (!ready.ok) {
+        setToast({ type: 'error', message: ready.error || 'Chưa sẵn sàng quét.' });
+        return;
+      }
+
+      const scanned = await DocumentCapture.scanDocument(10);
+      if (scanned.length === 0) {
+        setScannerBusy(false);
+        return; // Người dùng huỷ giữa chừng
+      }
+
+      const baseTime = Date.now();
+      const PAGE_WIDTH = 900;
+
+      const newPages: NotebookPage[] = await Promise.all(
+        scanned.map(async (item, i) => {
+          const assetId = StorageEngine.newAssetId('pdf');
+          const objectUrl = await StorageEngine.putAsset(assetId, item.blob, 'pdf');
+
+          return {
+            id: `p-scan-${baseTime}-${i}`,
+            pageIndex: 0,
+            template: 'blank',
+            paperSize: 'custom',
+            pageWidth: PAGE_WIDTH,
+            pageHeight: Math.round(PAGE_WIDTH * (item.height / item.width)),
+            pdfAssetId: assetId,
+            pdfDataUrl: objectUrl,
+            pdfSourceName: `Bản quét ${new Date().toLocaleDateString('vi-VN')}`,
+            strokes: [],
+            textElements: [],
+            imageElements: [],
+            audioNotes: []
+          } as NotebookPage;
+        })
+      );
+
+      const notebook = notebooksRef.current.find(n => n.id === activeNotebookId);
+      if (notebook) {
+        const insertAt = currentPageIndex + 1;
+        const merged = PageOps.reindex([
+          ...notebook.pages.slice(0, insertAt),
+          ...newPages,
+          ...notebook.pages.slice(insertAt)
+        ]);
+        commit(
+          notebooksRef.current.map(n =>
+            n.id === activeNotebookId ? { ...n, pages: merged, updatedAt: Date.now() } : n
+          )
+        );
+        setCurrentPageIndex(insertAt);
+      }
+
+      setToast({
+        type: 'info',
+        message: `Đã quét ${scanned.length} trang, viền đã được cắt và nắn thẳng. Ghi chú trực tiếp lên được.`
+      });
+    } catch (e: any) {
+      setToast({ type: 'error', message: e?.message || 'Quét tài liệu thất bại.' });
+    } finally {
+      setScannerBusy(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // Sao lưu & khôi phục toàn bộ thư viện
   // ---------------------------------------------------------------------------
   const [isBackingUp, setIsBackingUp] = useState(false);
@@ -1095,6 +1235,8 @@ export const App: React.FC = () => {
         onRedo={handleRedo}
         onOpenSearch={() => setSearchOpen(true)}
         onInsertImage={handleInsertImage}
+        onScanDocument={handleScanDocument}
+        isScanning={scannerBusy}
         isImportingPdf={pdfProgress !== null}
         audioNoteCount={currentPage?.audioNotes?.length || 0}
         audioBarOpen={audioBarOpen}
@@ -1122,6 +1264,8 @@ export const App: React.FC = () => {
         onChangeFontFamily={setFontFamily}
         smartShapeEnabled={smartShapeEnabled}
         onToggleSmartShape={() => setSmartShapeEnabled(!smartShapeEnabled)}
+        rulerEnabled={rulerEnabled}
+        onToggleRuler={() => setRulerEnabled(!rulerEnabled)}
         palmRejectionActive={palmRejectionActive}
         onTogglePalmRejection={() => setPalmRejectionActive(!palmRejectionActive)}
         zoomLevel={zoomLevel}
@@ -1148,6 +1292,7 @@ export const App: React.FC = () => {
             size={size}
             fontFamily={fontFamily}
             smartShapeEnabled={smartShapeEnabled}
+            rulerEnabled={rulerEnabled}
             palmRejectionActive={palmRejectionActive}
             zoomLevel={zoomLevel}
             onPageUpdate={applyPageUpdate}
@@ -1160,6 +1305,8 @@ export const App: React.FC = () => {
             inkInputTargetId={inkInputTargetId}
             onZoomChange={setZoomLevel}
             fitRequest={fitRequest}
+            onOcrImage={handleOcrImage}
+            ocrBusyImageId={ocrBusyImageId}
             onCopySelection={handleCopySelection}
             readClipboard={readClipboard}
             hasClipboard={hasClipboard}
