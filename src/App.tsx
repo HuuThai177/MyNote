@@ -14,6 +14,8 @@ import {
   DEFAULT_ORIENTATION
 } from './types/notebook';
 import { clampZoom, getPageSizeLabel } from './engine/PageGeometry';
+import { PageOps, ClipboardPayload } from './engine/PageOps';
+import { InkRecognitionService, ModelStatus, MODEL_SIZE_LABEL } from './engine/InkRecognitionService';
 import { StorageEngine, SaveResult } from './engine/StorageEngine';
 import { AudioSyncEngine } from './engine/AudioSyncEngine';
 import { HistoryEngine } from './engine/HistoryEngine';
@@ -396,6 +398,132 @@ export const App: React.FC = () => {
     commit(notebooks.filter(n => n.id !== id));
   };
 
+  // ---------------------------------------------------------------------------
+  // Quản lý sổ tay
+  // ---------------------------------------------------------------------------
+  /** Ghi lại thay đổi cho đúng một sổ tay, giữ nguyên phần còn lại */
+  const patchNotebook = (notebookId: string, patch: Partial<Notebook>, coalesceKey?: string) => {
+    const target = notebooksRef.current.find(n => n.id === notebookId);
+    if (!target) return;
+
+    const updated: Notebook = { ...target, ...patch, updatedAt: Date.now() };
+    commit(
+      notebooksRef.current.map(n => (n.id === notebookId ? updated : n)),
+      coalesceKey
+    );
+  };
+
+  const handleRenameNotebook = (notebookId: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    // Gõ liên tục trong ô tên chỉ tạo 1 bước hoàn tác
+    patchNotebook(notebookId, { title: trimmed }, `rename-${notebookId}`);
+  };
+
+  const handleChangeNotebookCategory = (notebookId: string, category: string) =>
+    patchNotebook(notebookId, { category });
+
+  const handleChangeNotebookCover = (notebookId: string, coverColor: string) =>
+    patchNotebook(notebookId, { coverColor });
+
+  // ---------------------------------------------------------------------------
+  // Quản lý trang
+  // ---------------------------------------------------------------------------
+  /** Áp danh sách trang mới cho sổ tay đang mở */
+  const setActivePages = (pages: NotebookPage[]) => {
+    const notebook = notebooksRef.current.find(n => n.id === activeNotebookId);
+    if (!notebook) return;
+    commit(
+      notebooksRef.current.map(n =>
+        n.id === activeNotebookId
+          ? { ...n, pages: PageOps.reindex(pages), updatedAt: Date.now() }
+          : n
+      )
+    );
+  };
+
+  const handleDuplicatePage = (index: number) => {
+    const notebook = notebooksRef.current.find(n => n.id === activeNotebookId);
+    const source = notebook?.pages[index];
+    if (!notebook || !source) return;
+
+    // Bản sao dùng CHUNG asset ảnh/ghi âm với bản gốc — không nhân đôi dung lượng
+    const copy = PageOps.duplicatePage(source);
+    const pages = [...notebook.pages];
+    pages.splice(index + 1, 0, copy);
+
+    setActivePages(pages);
+    setCurrentPageIndex(index + 1);
+    setToast({ type: 'info', message: `Đã nhân bản trang ${index + 1}.` });
+  };
+
+  const handleReorderPages = (from: number, to: number) => {
+    const notebook = notebooksRef.current.find(n => n.id === activeNotebookId);
+    if (!notebook || from === to) return;
+
+    setActivePages(PageOps.movePage(notebook.pages, from, to));
+
+    // Giữ người dùng ở đúng trang họ đang xem sau khi thứ tự đổi
+    setCurrentPageIndex(prev => {
+      if (prev === from) return to;
+      if (from < prev && to >= prev) return prev - 1;
+      if (from > prev && to <= prev) return prev + 1;
+      return prev;
+    });
+  };
+
+  const handleMovePageToNotebook = (pageIndex: number, targetNotebookId: string) => {
+    const library = notebooksRef.current;
+    const source = library.find(n => n.id === activeNotebookId);
+    const target = library.find(n => n.id === targetNotebookId);
+    const page = source?.pages[pageIndex];
+    if (!source || !target || !page || source.id === target.id) return;
+
+    if (source.pages.length <= 1) {
+      setToast({ type: 'error', message: 'Sổ tay phải còn ít nhất một trang.' });
+      return;
+    }
+
+    const now = Date.now();
+    commit(
+      library.map(n => {
+        if (n.id === source.id) {
+          return {
+            ...n,
+            pages: PageOps.reindex(n.pages.filter((_, i) => i !== pageIndex)),
+            updatedAt: now
+          };
+        }
+        if (n.id === target.id) {
+          return { ...n, pages: PageOps.reindex([...n.pages, page]), updatedAt: now };
+        }
+        return n;
+      })
+    );
+
+    setToast({
+      type: 'info',
+      message: `Đã chuyển trang ${pageIndex + 1} sang sổ tay "${target.title}".`
+    });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Khay nhớ tạm — sống ở App để copy/paste được giữa các trang và sổ tay
+  // ---------------------------------------------------------------------------
+  const clipboardRef = useRef<ClipboardPayload | null>(null);
+  const [hasClipboard, setHasClipboard] = useState(false);
+
+  const handleCopySelection = (payload: ClipboardPayload) => {
+    clipboardRef.current = payload;
+    setHasClipboard(!PageOps.isClipboardEmpty(payload));
+
+    const count =
+      payload.strokes.length + payload.textElements.length + payload.imageElements.length;
+    setToast({ type: 'info', message: `Đã sao chép ${count} đối tượng. Dán bằng Ctrl + V.` });
+  };
+
+  const readClipboard = (): ClipboardPayload | null => clipboardRef.current;
+
   const handleChangePageTemplate = (template: PaperTemplate) => {
     if (!currentPage) return;
     applyPageUpdate({ ...currentPage, template });
@@ -764,6 +892,36 @@ export const App: React.FC = () => {
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [lastBackupAt, setLastBackupAt] = useState<number | null>(null);
 
+  // ---------------------------------------------------------------------------
+  // Mô hình nhận diện ngoại tuyến (ML Kit)
+  // ---------------------------------------------------------------------------
+  const [inkModelStatus, setInkModelStatus] = useState<ModelStatus>('unknown');
+
+  useEffect(() => {
+    InkRecognitionService.refreshModelStatus().then(setInkModelStatus);
+    return InkRecognitionService.onStatusChange(setInkModelStatus);
+  }, []);
+
+  const handleDownloadInkModel = async () => {
+    setToast({
+      type: 'info',
+      message: `Đang tải mô hình tiếng Việt (${MODEL_SIZE_LABEL}). Lần này cần mạng, sau đó dùng được ngoại tuyến.`
+    });
+
+    const result = await InkRecognitionService.downloadModel();
+    setToast(
+      result.ok
+        ? { type: 'info', message: 'Đã tải xong. Nhận diện chữ viết tay giờ chạy ngay trên máy, không cần mạng.' }
+        : { type: 'error', message: result.error || 'Tải mô hình thất bại.' }
+    );
+  };
+
+  const handleDeleteInkModel = async () => {
+    await InkRecognitionService.deleteModel();
+    setToast({ type: 'info', message: 'Đã xoá mô hình ngoại tuyến. Nhận diện sẽ quay lại dùng mạng.' });
+  };
+
+
   useEffect(() => {
     StorageEngine.getMeta<number>('lastBackupAt').then(value => {
       if (typeof value === 'number') setLastBackupAt(value);
@@ -935,6 +1093,9 @@ export const App: React.FC = () => {
             inkInputTargetId={inkInputTargetId}
             onZoomChange={setZoomLevel}
             fitRequest={fitRequest}
+            onCopySelection={handleCopySelection}
+            readClipboard={readClipboard}
+            hasClipboard={hasClipboard}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-slate-500 font-semibold">
@@ -948,6 +1109,7 @@ export const App: React.FC = () => {
             targetPreview={
               currentPage.textElements.find(t => t.id === inkInputTargetId)?.text || ''
             }
+            preContext={inkBaseTextRef.current}
             palmRejectionActive={palmRejectionActive}
             onLiveTextChange={handleLiveInkText}
             onCommitLine={handleCommitInkLine}
@@ -1043,6 +1205,15 @@ export const App: React.FC = () => {
         onRestoreBackup={handleRestoreBackup}
         isBackupBusy={isBackingUp}
         lastBackupAt={lastBackupAt}
+        onRenameNotebook={handleRenameNotebook}
+        onChangeNotebookCategory={handleChangeNotebookCategory}
+        onChangeNotebookCover={handleChangeNotebookCover}
+        onDuplicatePage={handleDuplicatePage}
+        onReorderPages={handleReorderPages}
+        onMovePageToNotebook={handleMovePageToNotebook}
+        inkModelStatus={inkModelStatus}
+        onDownloadInkModel={handleDownloadInkModel}
+        onDeleteInkModel={handleDeleteInkModel}
       />
 
       {/* Tìm kiếm toàn bộ sổ tay */}

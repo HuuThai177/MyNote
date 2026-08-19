@@ -12,11 +12,8 @@ import {
   ChevronDown,
   Sparkles
 } from 'lucide-react';
-import {
-  VietnameseInkRecognizer,
-  InkRecognitionError,
-  RawInkStroke
-} from '../engine/VietnameseInkRecognizer';
+import { InkRecognitionError, RawInkStroke } from '../engine/VietnameseInkRecognizer';
+import { InkRecognitionService, RecognitionEngine } from '../engine/InkRecognitionService';
 
 interface PadPoint {
   x: number;
@@ -33,6 +30,8 @@ interface PadStroke {
 interface InkInputPadProps {
   /** Nội dung hiện tại của khung chữ đích, chỉ để hiển thị nhắc */
   targetPreview: string;
+  /** Chữ đã chốt đứng trước dòng đang viết — gửi cho engine làm ngữ cảnh */
+  preContext: string;
   palmRejectionActive: boolean;
   /** Kết quả nhận diện dòng đang viết — ghi đè phần chữ "sống" trong khung */
   onLiveTextChange: (recognizedLine: string) => void;
@@ -54,6 +53,7 @@ const LINE_TOO_LONG = 3200;
 
 export const InkInputPad: React.FC<InkInputPadProps> = ({
   targetPreview,
+  preContext,
   palmRejectionActive,
   onLiveTextChange,
   onCommitLine,
@@ -73,6 +73,7 @@ export const InkInputPad: React.FC<InkInputPadProps> = ({
   const [candidates, setCandidates] = useState<string[]>([]);
   const [recognizedLine, setRecognizedLine] = useState('');
   const [visibleWidth, setVisibleWidth] = useState(0);
+  const [engine, setEngine] = useState<RecognitionEngine>(InkRecognitionService.getActiveEngine());
 
   // Chiều rộng vùng nhìn phải đo bằng ResizeObserver: nếu lấy mặc định cứng thì
   // canvas sẽ hẹp hơn dải bảng và phần bên phải không viết được.
@@ -198,18 +199,20 @@ export const InkInputPad: React.FC<InkInputPadProps> = ({
     }));
 
     try {
-      const result = await VietnameseInkRecognizer.recognizeLine(
-        payload,
+      const result = await InkRecognitionService.recognize({
+        strokes: payload,
         // Đo lại từ chính tập nét được gửi: closure có thể giữ contentWidth của
         // lần render trước, chưa tính nét vừa viết xong.
-        measureContentWidth(padStrokes),
-        padHeight,
-        controller.signal
-      );
+        guideWidth: measureContentWidth(padStrokes),
+        guideHeight: padHeight,
+        preContext,
+        signal: controller.signal
+      });
 
       if (controller.signal.aborted) return;
       setRecognizedLine(result.text);
       setCandidates(result.candidates);
+      setEngine(result.engine);
       onLiveTextChange(result.text);
       setStatus('idle');
     } catch (e: any) {
@@ -222,11 +225,11 @@ export const InkInputPad: React.FC<InkInputPadProps> = ({
       }
       onRecognitionUnavailable(
         e instanceof InkRecognitionError && e.kind === 'offline'
-          ? 'Chế độ viết tay cần kết nối mạng. Đã tắt bảng viết để không điền chữ đoán sai vào ghi chú.'
+          ? 'Chưa tải mô hình ngoại tuyến nên chế độ viết tay đang cần mạng. Vào Sổ Tay → Nhận diện chữ để tải mô hình về dùng offline.'
           : 'Dịch vụ nhận diện chữ không phản hồi. Đã tắt bảng viết.'
       );
     }
-  }, [measureContentWidth, padHeight, onLiveTextChange, onRecognitionUnavailable]);
+  }, [measureContentWidth, padHeight, preContext, onLiveTextChange, onRecognitionUnavailable]);
 
   /** Hẹn nhận diện sau khi ngừng bút */
   const scheduleRecognition = (padStrokes: PadStroke[]) => {
@@ -355,6 +358,20 @@ export const InkInputPad: React.FC<InkInputPadProps> = ({
         <div className="flex items-center gap-2 shrink-0">
           <PenLine className="w-4 h-4 text-indigo-600" />
           <span className="text-xs font-bold text-slate-800 hidden sm:inline">Viết tay Tiếng Việt</span>
+          <span
+            className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
+              engine === 'native'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-slate-50 text-slate-500 border-slate-200'
+            }`}
+            title={
+              engine === 'native'
+                ? 'Đang nhận diện ngay trên máy, không cần mạng'
+                : 'Đang nhận diện qua mạng. Tải mô hình ML Kit để chạy ngoại tuyến.'
+            }
+          >
+            {engine === 'native' ? 'Offline' : 'Online'}
+          </span>
         </div>
 
         {/* Trạng thái */}

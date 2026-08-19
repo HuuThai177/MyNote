@@ -70,6 +70,34 @@ export const PAPER_SIZES: PaperSizeSpec[] = [
   }
 ];
 
+
+/** Màu bìa sổ tay (chuỗi gradient của Tailwind) */
+export interface CoverColorOption {
+  id: string;
+  name: string;
+  gradient: string;
+}
+
+export const COVER_COLORS: CoverColorOption[] = [
+  { id: 'indigo', name: 'Chàm', gradient: 'from-indigo-600 to-blue-700' },
+  { id: 'emerald', name: 'Ngọc lục', gradient: 'from-emerald-600 to-teal-700' },
+  { id: 'purple', name: 'Tím', gradient: 'from-purple-600 to-pink-700' },
+  { id: 'amber', name: 'Hổ phách', gradient: 'from-amber-500 to-orange-600' },
+  { id: 'rose', name: 'Hồng đào', gradient: 'from-rose-500 to-red-600' },
+  { id: 'sky', name: 'Xanh trời', gradient: 'from-sky-500 to-cyan-600' },
+  { id: 'slate', name: 'Xám khói', gradient: 'from-slate-600 to-slate-800' },
+  { id: 'lime', name: 'Xanh cốm', gradient: 'from-lime-500 to-green-600' }
+];
+
+export const NOTEBOOK_CATEGORIES = [
+  'Học Tập',
+  'Công Việc',
+  'Thiết Kế',
+  'Lập Kế Hoạch',
+  'Cá Nhân',
+  'Tài Liệu'
+];
+
 export const DEFAULT_PAPER_SIZE: PaperSizeId = 'a4';
 export const DEFAULT_ORIENTATION: PaperOrientation = 'portrait';
 

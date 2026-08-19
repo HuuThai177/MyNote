@@ -18,7 +18,16 @@ import {
   ShieldAlert,
   CloudUpload,
   CloudDownload,
-  Loader2
+  Loader2,
+  GripVertical,
+  CopyPlus,
+  FolderInput,
+  Pencil,
+  Palette,
+  PenLine,
+  Download,
+  WifiOff,
+  Wifi
 } from 'lucide-react';
 import {
   Notebook,
@@ -27,7 +36,9 @@ import {
   PaperOrientation,
   PAPER_SIZES,
   DEFAULT_PAPER_SIZE,
-  DEFAULT_ORIENTATION
+  DEFAULT_ORIENTATION,
+  COVER_COLORS,
+  NOTEBOOK_CATEGORIES
 } from '../types/notebook';
 import { PageThumbnail } from './PageThumbnail';
 
@@ -61,6 +72,18 @@ interface SidebarProps {
   isBackupBusy: boolean;
   /** Mốc sao lưu gần nhất; null = chưa bao giờ sao lưu */
   lastBackupAt: number | null;
+  // Quản lý sổ tay
+  onRenameNotebook: (notebookId: string, title: string) => void;
+  onChangeNotebookCategory: (notebookId: string, category: string) => void;
+  onChangeNotebookCover: (notebookId: string, coverColor: string) => void;
+  // Quản lý trang
+  onDuplicatePage: (index: number) => void;
+  onReorderPages: (from: number, to: number) => void;
+  onMovePageToNotebook: (pageIndex: number, targetNotebookId: string) => void;
+  // Mô hình nhận diện ngoại tuyến
+  inkModelStatus: 'unsupported' | 'unknown' | 'missing' | 'downloading' | 'ready';
+  onDownloadInkModel: () => void;
+  onDeleteInkModel: () => void;
 }
 
 /** Sao lưu thủ công thì cái chết người là quên — nên phải nói rõ đã bao lâu */
@@ -106,7 +129,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCreateBackup,
   onRestoreBackup,
   isBackupBusy,
-  lastBackupAt
+  lastBackupAt,
+  onRenameNotebook,
+  onChangeNotebookCategory,
+  onChangeNotebookCover,
+  onDuplicatePage,
+  onReorderPages,
+  onMovePageToNotebook,
+  inkModelStatus,
+  onDownloadInkModel,
+  onDeleteInkModel
 }) => {
   const backupAge = describeBackupAge(lastBackupAt);
   const [activeTab, setActiveTab] = useState<'notebooks' | 'pages' | 'templates'>('notebooks');
@@ -116,6 +148,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [newTemplate, setNewTemplate] = useState<PaperTemplate>('grid');
   const [newPaperSize, setNewPaperSize] = useState<PaperSizeId>(DEFAULT_PAPER_SIZE);
   const [newOrientation, setNewOrientation] = useState<PaperOrientation>(DEFAULT_ORIENTATION);
+
+  /** Sổ tay đang mở bảng sửa tên / danh mục / màu bìa */
+  const [editingNotebookId, setEditingNotebookId] = useState<string | null>(null);
+  /** Trang đang mở danh sách "chuyển sang sổ tay khác" */
+  const [movingPageIndex, setMovingPageIndex] = useState<number | null>(null);
+
+  // Kéo thả sắp xếp trang. Dùng pointer event thay cho HTML5 drag-and-drop vì
+  // HTML5 DnD gần như không hoạt động khi chạm trên tablet.
+  const [draggingPage, setDraggingPage] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<number | null>(null);
+
+  const beginPageDrag = (e: React.PointerEvent, index: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    setDraggingPage(index);
+    setDropTarget(index);
+  };
+
+  const handleDragMove = (e: React.PointerEvent) => {
+    if (draggingPage === null) return;
+    // elementFromPoint vẫn trả đúng phần tử dưới ngón tay kể cả khi đã
+    // setPointerCapture, nên đây là cách đơn giản nhất để biết đang thả vào đâu
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const card = under?.closest('[data-page-card]');
+    const attr = card?.getAttribute('data-page-card');
+    if (attr !== null && attr !== undefined) setDropTarget(Number(attr));
+  };
+
+  const finishPageDrag = () => {
+    if (draggingPage !== null && dropTarget !== null && draggingPage !== dropTarget) {
+      onReorderPages(draggingPage, dropTarget);
+    }
+    setDraggingPage(null);
+    setDropTarget(null);
+  };
 
   const currentNotebook = notebooks.find(n => n.id === activeNotebookId);
   const activeSpec = PAPER_SIZES.find(s => s.id === currentPaperSize);
@@ -136,7 +204,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity" onClick={onClose} />
 
       {/* Drawer Container */}
-      <div className="relative w-80 sm:w-96 h-full glass-panel border-r border-slate-700/70 shadow-2xl flex flex-col z-10 animate-pop">
+      <div
+        className="relative w-80 sm:w-96 h-full glass-panel border-r border-slate-700/70 shadow-2xl flex flex-col z-10 animate-pop"
+        onPointerMove={handleDragMove}
+        onPointerUp={finishPageDrag}
+        onPointerCancel={finishPageDrag}
+      >
         {/* Header */}
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -196,87 +269,269 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
 
               <div className="space-y-2 mt-3">
-                {notebooks.map((nb) => (
-                  <div
-                    key={nb.id}
-                    onClick={() => {
-                      onSelectNotebook(nb.id);
-                      onClose();
-                    }}
-                    className={`group p-3 rounded-2xl border transition cursor-pointer flex items-center justify-between ${
-                      nb.id === activeNotebookId
-                        ? 'bg-indigo-950/60 border-indigo-500/60 text-white shadow-md'
-                        : 'glass-card text-slate-300 hover:border-slate-600'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-12 rounded-lg bg-gradient-to-br ${nb.coverColor || 'from-indigo-600 to-purple-600'} flex items-center justify-center shadow-md`}>
-                        <BookOpen className="w-5 h-5 text-white/90" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-sm line-clamp-1">{nb.title}</h4>
-                        <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-                          <span className="text-indigo-400 font-medium">{nb.category}</span>
-                          <span>•</span>
-                          <span>{nb.pages.length} trang</span>
+                {notebooks.map((nb) => {
+                  const isEditing = editingNotebookId === nb.id;
+
+                  return (
+                    <div
+                      key={nb.id}
+                      className={`group rounded-2xl border transition ${
+                        nb.id === activeNotebookId
+                          ? 'bg-indigo-950/60 border-indigo-500/60 text-white shadow-md'
+                          : 'glass-card text-slate-300 hover:border-slate-600'
+                      }`}
+                    >
+                      <div
+                        onClick={() => {
+                          if (isEditing) return;
+                          onSelectNotebook(nb.id);
+                          onClose();
+                        }}
+                        className="p-3 flex items-center justify-between cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`w-10 h-12 rounded-lg bg-gradient-to-br ${
+                              nb.coverColor || 'from-indigo-600 to-purple-600'
+                            } flex items-center justify-center shadow-md shrink-0`}
+                          >
+                            <BookOpen className="w-5 h-5 text-white/90" />
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-sm line-clamp-1">{nb.title}</h4>
+                            <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                              <span className="text-indigo-400 font-medium truncate">{nb.category}</span>
+                              <span>•</span>
+                              <span className="shrink-0">{nb.pages.length} trang</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingNotebookId(isEditing ? null : nb.id);
+                            }}
+                            className={`p-2 rounded-lg transition ${
+                              isEditing
+                                ? 'text-indigo-300 bg-slate-800'
+                                : 'text-slate-400 hover:text-indigo-300 hover:bg-slate-800'
+                            }`}
+                            title="Đổi tên, danh mục và màu bìa"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+
+                          {notebooks.length > 1 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (confirm(`Xoá sổ tay "${nb.title}" cùng ${nb.pages.length} trang bên trong?`)) {
+                                  onDeleteNotebook(nb.id);
+                                }
+                              }}
+                              className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                              title="Xoá sổ tay"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
-                    </div>
 
-                    {notebooks.length > 1 && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm(`Bạn có chắc muốn xóa sổ tay "${nb.title}"?`)) {
-                            onDeleteNotebook(nb.id);
-                          }
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
-                        title="Xóa sổ tay"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                      {/* Bảng sửa: tên, danh mục, màu bìa */}
+                      {isEditing && (
+                        <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-slate-700/60 animate-pop">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 block mb-1">
+                              Tên sổ tay
+                            </label>
+                            <input
+                              type="text"
+                              value={nb.title}
+                              onChange={(e) => onRenameNotebook(nb.id, e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 block mb-1">
+                              Danh mục
+                            </label>
+                            <select
+                              value={nb.category}
+                              onChange={(e) => onChangeNotebookCategory(nb.id, e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-indigo-500"
+                            >
+                              {Array.from(new Set([...NOTEBOOK_CATEGORIES, nb.category])).map(c => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 mb-1 flex items-center gap-1">
+                              <Palette className="w-3 h-3" />
+                              Màu bìa
+                            </label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {COVER_COLORS.map(coverColor => (
+                                <button
+                                  key={coverColor.id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onChangeNotebookCover(nb.id, coverColor.gradient);
+                                  }}
+                                  className={`w-7 h-7 rounded-lg bg-gradient-to-br ${coverColor.gradient} transition hover:scale-110 ${
+                                    nb.coverColor === coverColor.gradient
+                                      ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900'
+                                      : ''
+                                  }`}
+                                  title={coverColor.name}
+                                />
+                              ))}
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingNotebookId(null);
+                            }}
+                            className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition"
+                          >
+                            Xong
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {/* TAB 2: PAGES THUMBNAILS */}
+          {/* TAB 2: TRANG — kéo thả sắp xếp, nhân bản, chuyển sổ tay */}
           {activeTab === 'pages' && (
             <div className="space-y-3">
+              <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                <GripVertical className="w-3 h-3" />
+                Giữ tay cầm rồi kéo để đổi thứ tự trang
+              </p>
+
               <div className="grid grid-cols-2 gap-3">
-                {currentNotebook?.pages.map((pg, index) => (
-                  <div
-                    key={pg.id}
-                    onClick={() => {
-                      onSelectPage(index);
-                      onClose();
-                    }}
-                    className={`relative rounded-xl border p-2 transition cursor-pointer flex flex-col items-center gap-2 ${
-                      index === currentPageIndex
-                        ? 'bg-indigo-950/80 border-indigo-500 ring-2 ring-indigo-500/40'
-                        : 'glass-card border-slate-700 hover:border-slate-500'
-                    }`}
-                  >
-                    <PageThumbnail page={pg} width={150} />
-                    <div className="w-full flex items-center justify-between text-xs px-1 text-slate-300">
-                      <span>Trang {index + 1}</span>
-                      {currentNotebook.pages.length > 1 && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeletePage(index);
-                          }}
-                          className="text-slate-400 hover:text-rose-400 p-1"
+                {currentNotebook?.pages.map((pg, index) => {
+                  const isDragging = draggingPage === index;
+                  const isDropTarget = dropTarget === index && draggingPage !== index;
+
+                  return (
+                    <div
+                      key={pg.id}
+                      data-page-card={index}
+                      onClick={() => {
+                        if (draggingPage !== null) return;
+                        onSelectPage(index);
+                        onClose();
+                      }}
+                      className={`relative rounded-xl border p-2 transition cursor-pointer flex flex-col gap-2 ${
+                        isDragging
+                          ? 'opacity-40 border-indigo-400'
+                          : isDropTarget
+                            ? 'border-indigo-400 ring-2 ring-indigo-400/60 scale-[1.03]'
+                            : index === currentPageIndex
+                              ? 'bg-indigo-950/80 border-indigo-500 ring-2 ring-indigo-500/40'
+                              : 'glass-card border-slate-700 hover:border-slate-500'
+                      }`}
+                    >
+                      <PageThumbnail page={pg} width={150} />
+
+                      <div className="w-full flex items-center justify-between gap-1 text-xs px-0.5 text-slate-300">
+                        {/* Tay cầm kéo thả */}
+                        <div
+                          onPointerDown={(e) => beginPageDrag(e, index)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center gap-1 cursor-grab active:cursor-grabbing text-slate-400 hover:text-indigo-300 touch-none"
+                          title="Kéo để đổi thứ tự trang"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                          <GripVertical className="w-3.5 h-3.5" />
+                          <span className="font-semibold">{index + 1}</span>
+                        </div>
+
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDuplicatePage(index);
+                            }}
+                            className="p-1 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800 transition"
+                            title="Nhân bản trang này"
+                          >
+                            <CopyPlus className="w-3.5 h-3.5" />
+                          </button>
+
+                          {notebooks.length > 1 && currentNotebook.pages.length > 1 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMovingPageIndex(movingPageIndex === index ? null : index);
+                              }}
+                              className={`p-1 rounded transition ${
+                                movingPageIndex === index
+                                  ? 'text-indigo-300 bg-slate-800'
+                                  : 'text-slate-400 hover:text-indigo-300 hover:bg-slate-800'
+                              }`}
+                              title="Chuyển trang sang sổ tay khác"
+                            >
+                              <FolderInput className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {currentNotebook.pages.length > 1 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeletePage(index);
+                              }}
+                              className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                              title="Xoá trang"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Chọn sổ tay đích */}
+                      {movingPageIndex === index && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute inset-x-1 bottom-9 z-20 glass-panel rounded-xl border border-slate-700 p-1.5 shadow-2xl animate-pop max-h-40 overflow-y-auto"
+                        >
+                          <p className="text-[10px] font-bold text-slate-400 px-1.5 pb-1">
+                            Chuyển sang…
+                          </p>
+                          {notebooks
+                            .filter(nb => nb.id !== activeNotebookId)
+                            .map(nb => (
+                              <button
+                                key={nb.id}
+                                onClick={() => {
+                                  onMovePageToNotebook(index, nb.id);
+                                  setMovingPageIndex(null);
+                                }}
+                                className="w-full text-left px-1.5 py-1.5 rounded-lg text-[11px] text-slate-200 hover:bg-indigo-600/30 transition truncate"
+                              >
+                                {nb.title}
+                              </button>
+                            ))}
+                        </div>
                       )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <button
@@ -419,6 +674,65 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* CHÂN: SAO LƯU & KHÔI PHỤC — luôn hiện ở mọi tab vì đây là thao tác
             cấp toàn bộ thư viện, không thuộc riêng sổ tay hay trang nào */}
+        {/* CHÂN: NHẬN DIỆN CHỮ VIẾT TAY */}
+        <div className="shrink-0 border-t border-slate-800 px-3 pt-3 pb-1">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 px-0.5 mb-2">
+            <PenLine className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Nhận diện chữ viết tay</span>
+          </div>
+
+          {inkModelStatus === 'ready' && (
+            <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-700/50">
+              <div className="flex items-center gap-2 min-w-0">
+                <WifiOff className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold text-emerald-300">Chạy ngoại tuyến</p>
+                  <p className="text-[10px] text-slate-400">Mô hình tiếng Việt đã có trên máy</p>
+                </div>
+              </div>
+              <button
+                onClick={onDeleteInkModel}
+                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition shrink-0"
+                title="Xoá mô hình để lấy lại dung lượng"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {inkModelStatus === 'downloading' && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-800/60 border border-slate-700">
+              <Loader2 className="w-4 h-4 text-indigo-400 animate-spin shrink-0" />
+              <p className="text-[11px] font-semibold text-slate-300">Đang tải mô hình tiếng Việt…</p>
+            </div>
+          )}
+
+          {inkModelStatus === 'missing' && (
+            <button
+              onClick={onDownloadInkModel}
+              className="w-full flex items-center gap-2.5 p-2.5 rounded-xl bg-indigo-600/20 border border-indigo-500/50 hover:bg-indigo-600/30 transition text-left"
+            >
+              <Download className="w-4 h-4 text-indigo-300 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold text-indigo-200">Tải mô hình ngoại tuyến (~20 MB)</p>
+                <p className="text-[10px] text-slate-400 leading-snug">
+                  Nhận diện ngay trên máy, không cần mạng và nhanh hơn
+                </p>
+              </div>
+            </button>
+          )}
+
+          {(inkModelStatus === 'unsupported' || inkModelStatus === 'unknown') && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/60">
+              <Wifi className="w-4 h-4 text-slate-500 shrink-0" />
+              <p className="text-[10px] text-slate-400 leading-snug">
+                Đang dùng bộ nhận diện trực tuyến. Bản ứng dụng Android tải được mô hình về
+                chạy ngoại tuyến.
+              </p>
+            </div>
+          )}
+        </div>
+
         <div className="shrink-0 border-t border-slate-800 p-3 space-y-2">
           <div
             className={`flex items-center gap-1.5 text-[11px] font-bold px-0.5 ${

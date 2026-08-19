@@ -141,7 +141,8 @@ export class VietnameseInkRecognizer {
     strokes: RawInkStroke[],
     guideWidth: number,
     guideHeight: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    preContext?: string
   ): Promise<LineRecognitionResult> {
     if (strokes.length === 0) {
       throw new InkRecognitionError('Chưa có nét nào để nhận diện', 'empty');
@@ -181,6 +182,9 @@ export class VietnameseInkRecognizer {
           options: 'enable_pre_space',
           requests: [
             {
+              // Chữ đứng ngay trước giúp mô hình ngôn ngữ tách từ và phân biệt
+              // những nét dễ nhầm như "n" với "u"
+              pre_context: preContext || '',
               writing_guide: {
                 writing_area_width: Math.round(guideWidth),
                 writing_area_height: Math.round(guideHeight)
@@ -256,7 +260,12 @@ export class VietnameseInkRecognizer {
 
     // Chừa lề quanh nét giống như khi viết trên bảng, giúp engine ước lượng
     // chiều cao chữ sát thực tế hơn.
-    const result = await this.recognizeLine(payload, rawWidth * 1.15, rawHeight * 1.6);
+    const { InkRecognitionService } = await import('./InkRecognitionService');
+    const result = await InkRecognitionService.recognize({
+      strokes: payload,
+      guideWidth: rawWidth * 1.15,
+      guideHeight: rawHeight * 1.6
+    });
 
     return {
       text: result.text,

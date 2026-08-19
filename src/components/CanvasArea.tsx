@@ -11,6 +11,7 @@ import {
   MAX_ZOOM
 } from '../types/notebook';
 import { getPageDimensions, clampZoom } from '../engine/PageGeometry';
+import { PageOps, ClipboardPayload } from '../engine/PageOps';
 import { ShapeSmoother } from '../engine/ShapeSmoother';
 import { VietnameseInkRecognizer, InkRecognitionError } from '../engine/VietnameseInkRecognizer';
 import { LassoContextMenu } from './LassoContextMenu';
@@ -57,6 +58,10 @@ interface CanvasAreaProps {
   onZoomChange: (zoom: number) => void;
   /** Yêu cầu canh trang vừa khung nhìn; token tăng mỗi lần bấm nút */
   fitRequest: { mode: 'width' | 'page'; token: number } | null;
+  /** Khay nhớ tạm nằm ở App để dán được sang trang khác, sổ tay khác */
+  onCopySelection: (payload: ClipboardPayload) => void;
+  readClipboard: () => ClipboardPayload | null;
+  hasClipboard: boolean;
 }
 
 /** Cửa sổ thời gian (giây) quanh mốc đang phát để làm sáng nét vẽ */
@@ -84,7 +89,10 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   onRequestInkInput,
   inkInputTargetId,
   onZoomChange,
-  fitRequest
+  fitRequest,
+  onCopySelection,
+  readClipboard,
+  hasClipboard
 }) => {
   /** Lớp tĩnh: nét đã lưu — chỉ vẽ lại khi tập nét thay đổi */
   const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1042,8 +1050,9 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     imageIds: page.imageElements.filter(i => isRectInPolygon(i, poly)).map(i => i.id)
   });
 
-  /** Khung bao chung của cả nét vẽ, khung chữ và ảnh đang chọn */
-  const getSelectionBounds = (
+  /** Khung bao chung, tính trên một trang cụ thể (dùng khi vừa dán xong) */
+  const getSelectionBoundsIn = (
+    targetPage: NotebookPage,
     strokes: Stroke[],
     textIds: string[],
     imageIds: string[]
@@ -1061,16 +1070,20 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     };
 
     strokes.forEach(s => s.points.forEach(p => include(p.x, p.y)));
-    page.textElements
+    targetPage.textElements
       .filter(t => textIds.includes(t.id))
       .forEach(t => { include(t.x, t.y); include(t.x + t.width, t.y + t.height); });
-    page.imageElements
+    targetPage.imageElements
       .filter(i => imageIds.includes(i.id))
       .forEach(i => { include(i.x, i.y); include(i.x + i.width, i.y + i.height); });
 
     if (minX === Infinity) return { x: 0, y: 0, width: 100, height: 40 };
     return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
   };
+
+  /** Khung bao trên trang đang mở */
+  const getSelectionBounds = (strokes: Stroke[], textIds: string[], imageIds: string[]) =>
+    getSelectionBoundsIn(page, strokes, textIds, imageIds);
 
   // Nắn nét thành hình học khi giữ yên bút
   const triggerShapeSmooth = () => {
@@ -1184,6 +1197,99 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     setInkModalOpen(false);
     setSelectedTextId(newTextElement.id);
   };
+
+  // ---------------------------------------------------------------------------
+  // Sao chép / dán / nhân bản đối tượng
+  // ---------------------------------------------------------------------------
+  const buildClipboardPayload = (): ClipboardPayload | null => {
+    if (selectionCount === 0) return null;
+    return PageOps.toClipboard(
+      selectedStrokes,
+      page.textElements.filter(t => selectedTextIds.includes(t.id)),
+      page.imageElements.filter(i => selectedImageIds.includes(i.id))
+    );
+  };
+
+  const handleCopy = () => {
+    const payload = buildClipboardPayload();
+    if (payload) onCopySelection(payload);
+  };
+
+  const handleCut = () => {
+    const payload = buildClipboardPayload();
+    if (!payload) return;
+    onCopySelection(payload);
+    handleDeleteSelectedStrokes();
+  };
+
+  /** Dán vào trang hiện tại rồi chọn luôn phần vừa dán để kéo đi ngay */
+  const pasteClipboard = (payload: ClipboardPayload | null) => {
+    if (PageOps.isClipboardEmpty(payload)) return;
+
+    const { page: nextPage, newStrokeIds, newTextIds, newImageIds } = PageOps.pasteInto(
+      page,
+      payload!
+    );
+    onPageUpdate(nextPage);
+
+    const pastedStrokes = nextPage.strokes.filter(s => newStrokeIds.includes(s.id));
+    setSelectedStrokes(pastedStrokes);
+    setSelectedTextIds(newTextIds);
+    setSelectedImageIds(newImageIds);
+
+    const bounds = {
+      strokes: pastedStrokes,
+      textIds: newTextIds,
+      imageIds: newImageIds
+    };
+    const bbox = getSelectionBoundsIn(nextPage, bounds.strokes, bounds.textIds, bounds.imageIds);
+
+    // Khung chọn hình chữ nhật quanh phần vừa dán để kéo/thu phóng được ngay
+    setLassoPolygon([
+      { x: bbox.x - 8, y: bbox.y - 8 },
+      { x: bbox.x + bbox.width + 8, y: bbox.y - 8 },
+      { x: bbox.x + bbox.width + 8, y: bbox.y + bbox.height + 8 },
+      { x: bbox.x - 8, y: bbox.y + bbox.height + 8 }
+    ]);
+    setLassoMenuPos(toClientPoint(bbox.x + bbox.width / 2, bbox.y - 8));
+  };
+
+  const handlePaste = () => pasteClipboard(readClipboard());
+
+  /** Nhân bản tại chỗ: chép rồi dán ngay, không đụng vào khay nhớ tạm */
+  const handleDuplicateSelection = () => {
+    const payload = buildClipboardPayload();
+    if (payload) pasteClipboard(payload);
+  };
+
+  // Phím tắt sao chép/dán. Bỏ qua khi con trỏ đang ở trong ô nhập liệu để
+  // không cướp Ctrl+C/V của việc gõ chữ.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+
+      const key = e.key.toLowerCase();
+      if (key === 'c' && selectionCount > 0) {
+        e.preventDefault();
+        handleCopy();
+      } else if (key === 'x' && selectionCount > 0) {
+        e.preventDefault();
+        handleCut();
+      } else if (key === 'v') {
+        e.preventDefault();
+        handlePaste();
+      } else if (key === 'd' && selectionCount > 0) {
+        e.preventDefault();
+        handleDuplicateSelection();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
 
   const handleDeleteSelectedStrokes = () => {
     const strokeIds = selectedStrokes.map(s => s.id);
@@ -1524,6 +1630,8 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           onConvertToText={handleConvertToTextModal}
           isRecognizing={isRecognizingSelection}
           canRecognize={selectedStrokes.length > 0}
+          onCopy={handleCopy}
+          onDuplicate={handleDuplicateSelection}
           onDeleteStrokes={handleDeleteSelectedStrokes}
           onScaleSelected={handleScaleSelectedStrokes}
           onClose={clearSelection}

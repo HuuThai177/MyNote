@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Trash2, X, ZoomIn, ZoomOut, Move, Loader2 } from 'lucide-react';
+import { Sparkles, Trash2, X, ZoomIn, ZoomOut, Move, Loader2, Copy, CopyPlus } from 'lucide-react';
 
 interface LassoContextMenuProps {
   x: number;
@@ -9,6 +9,8 @@ interface LassoContextMenuProps {
   isRecognizing: boolean;
   /** Chỉ nhận diện được khi vùng khoanh có nét viết tay */
   canRecognize: boolean;
+  onCopy: () => void;
+  onDuplicate: () => void;
   onDeleteStrokes: () => void;
   onScaleSelected: (factor: number) => void;
   onClose: () => void;
@@ -20,6 +22,8 @@ export const LassoContextMenu: React.FC<LassoContextMenuProps> = ({
   onConvertToText,
   isRecognizing,
   canRecognize,
+  onCopy,
+  onDuplicate,
   onDeleteStrokes,
   onScaleSelected,
   onClose
@@ -80,6 +84,23 @@ export const LassoContextMenu: React.FC<LassoContextMenuProps> = ({
           </>
         )}
       </button>
+
+      <div className="chrome-group flex items-center p-0.5">
+        <button
+          onClick={onCopy}
+          className="chrome-btn w-8 h-8"
+          title="Sao chép vùng chọn (Ctrl + C) — dán được sang trang khác, sổ tay khác"
+        >
+          <Copy className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onDuplicate}
+          className="chrome-btn w-8 h-8"
+          title="Nhân bản tại chỗ (Ctrl + D)"
+        >
+          <CopyPlus className="w-4 h-4" />
+        </button>
+      </div>
 
       <button
         onClick={onDeleteStrokes}
