@@ -188,6 +188,8 @@ export interface NotebookPage {
   id: string;
   pageIndex: number;
   template: PaperTemplate;
+  /** Tên trang, dùng làm đích cho liên kết [[...]] */
+  title?: string;
   /** Khổ giấy; mặc định 'a4' khi thiếu (dữ liệu bản cũ) */
   paperSize?: PaperSizeId;
   orientation?: PaperOrientation;

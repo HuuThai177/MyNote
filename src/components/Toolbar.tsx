@@ -25,9 +25,15 @@ import {
   Ruler,
   Presentation,
   Moon,
-  BarChart3
+  BarChart3,
+  Circle,
+  Triangle,
+  Grid3x3,
+  Ban,
+  Network
 } from 'lucide-react';
 import { ToolType, VIETNAMESE_HANDWRITING_FONTS } from '../types/notebook';
+import { StencilTool } from '../engine/StencilGeometry';
 
 interface ToolbarProps {
   currentTool: ToolType;
@@ -40,9 +46,9 @@ interface ToolbarProps {
   onChangeFontFamily: (font: string) => void;
   smartShapeEnabled: boolean;
   onToggleSmartShape: () => void;
-  /** Hiện thước kẻ vật lý trên trang giấy */
-  rulerEnabled: boolean;
-  onToggleRuler: () => void;
+  /** Khuôn vẽ đang dùng */
+  stencilTool: StencilTool;
+  onChangeStencil: (tool: StencilTool) => void;
   // Điều khiển khung nhìn (chuyển từ header sang đây cho đúng nhóm chức năng)
   palmRejectionActive: boolean;
   onTogglePalmRejection: () => void;
@@ -57,6 +63,7 @@ interface ToolbarProps {
   nightMode: boolean;
   onToggleNightMode: () => void;
   onOpenStats: () => void;
+  onOpenGraph: () => void;
 }
 
 /** Sáu màu hay dùng nhất, luôn hiện sẵn trên thanh công cụ */
@@ -74,6 +81,14 @@ const PALETTE = [
   '#000000', '#1e293b', '#475569', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f8fafc', '#ffffff',
   '#7f1d1d', '#dc2626', '#e11d48', '#db2777', '#a21caf', '#7c3aed', '#4f46e5', '#2563eb',
   '#0891b2', '#0d9488', '#059669', '#16a34a', '#65a30d', '#ca8a04', '#d97706', '#ea580c'
+];
+
+const STENCILS: { id: StencilTool; icon: React.ElementType; name: string; hint: string }[] = [
+  { id: 'none', icon: Ban, name: 'Không dùng khuôn', hint: 'Vẽ tay tự do' },
+  { id: 'ruler', icon: Ruler, name: 'Thước kẻ', hint: 'Kéo và xoay, nét hút vào cạnh thước' },
+  { id: 'circle', icon: Circle, name: 'Khuôn tròn', hint: 'Nét hút vào vành, vẽ vòng tròn chuẩn' },
+  { id: 'protractor', icon: Triangle, name: 'Thước đo góc', hint: 'Nửa vòng có vạch chia độ' },
+  { id: 'isometric', icon: Grid3x3, name: 'Lưới đẳng cự', hint: 'Mọi nét theo 30° / 90° / 150°' }
 ];
 
 const PEN_SIZES = [
@@ -109,8 +124,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onChangeFontFamily,
   smartShapeEnabled,
   onToggleSmartShape,
-  rulerEnabled,
-  onToggleRuler,
+  stencilTool,
+  onChangeStencil,
   palmRejectionActive,
   onTogglePalmRejection,
   zoomLevel,
@@ -123,13 +138,16 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onTogglePresentMode,
   nightMode,
   onToggleNightMode,
-  onOpenStats
+  onOpenStats,
+  onOpenGraph
 }) => {
   const [showFontPicker, setShowFontPicker] = useState(false);
   const [showColorPanel, setShowColorPanel] = useState(false);
   const [colorAnchor, setColorAnchor] = useState<HTMLElement | null>(null);
   const [fontAnchor, setFontAnchor] = useState<HTMLElement | null>(null);
   const [hexDraft, setHexDraft] = useState('');
+  const [showStencilMenu, setShowStencilMenu] = useState(false);
+  const [stencilAnchor, setStencilAnchor] = useState<HTMLElement | null>(null);
   const [presets, setPresets] = useState<PenPreset[]>(() => PenPresets.load());
   const [recentColors, setRecentColors] = useState<string[]>(() => PenPresets.loadRecentColors());
   /** Ô nhập mã màu chỉ áp dụng khi gõ đủ 6 ký tự hợp lệ */
@@ -440,18 +458,56 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         )}
 
         {showPenSizes && (
-          <button
-            onClick={onToggleRuler}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition shrink-0 ${
-              rulerEnabled
-                ? 'bg-sky-50 text-sky-700 border-sky-300'
-                : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'
-            }`}
-            title="Đặt thước lên trang: kéo và xoay được, nét bút tự hút vào cạnh thước"
-          >
-            <Ruler className={`w-4 h-4 ${rulerEnabled ? 'text-sky-600' : 'text-slate-400'}`} />
-            <span className="hidden lg:inline">Thước kẻ</span>
-          </button>
+          <>
+            <button
+              ref={setStencilAnchor}
+              onClick={() => setShowStencilMenu(!showStencilMenu)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition shrink-0 ${
+                stencilTool !== 'none'
+                  ? 'bg-sky-50 text-sky-700 border-sky-300'
+                  : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'
+              }`}
+              title="Bộ khuôn vẽ: thước kẻ, khuôn tròn, thước đo góc, lưới đẳng cự"
+            >
+              {(() => {
+                const active = STENCILS.find(st => st.id === stencilTool) ?? STENCILS[0];
+                const Icon = active.icon;
+                return <Icon className={`w-4 h-4 ${stencilTool !== 'none' ? 'text-sky-600' : 'text-slate-400'}`} />;
+              })()}
+              <span className="hidden lg:inline">
+                {STENCILS.find(st => st.id === stencilTool)?.name.replace('Không dùng khuôn', 'Khuôn vẽ')}
+              </span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
+
+            <FloatingPanel
+              anchor={stencilAnchor}
+              open={showStencilMenu}
+              onClose={() => setShowStencilMenu(false)}
+              width={272}
+            >
+              <div className="p-1.5">
+                {STENCILS.map(({ id, icon: Icon, name, hint }) => (
+                  <button
+                    key={id}
+                    onClick={() => {
+                      onChangeStencil(id);
+                      setShowStencilMenu(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl transition text-left ${
+                      stencilTool === id ? 'bg-sky-50 ring-1 ring-sky-200' : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    <Icon className={`w-4 h-4 shrink-0 ${stencilTool === id ? 'text-sky-600' : 'text-slate-400'}`} />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-800">{name}</p>
+                      <p className="text-[11px] text-slate-500 leading-snug">{hint}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </FloatingPanel>
+          </>
         )}
 
         {showFonts && (
@@ -577,6 +633,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           title="Trình chiếu: ẩn hết thanh công cụ, bút thành con trỏ laser (Esc để thoát)"
         >
           <Presentation className="w-4 h-4" />
+        </button>
+
+        {/* Bản đồ liên kết */}
+        <button
+          onClick={onOpenGraph}
+          className="chrome-btn w-9 h-9 border border-slate-200"
+          title="Bản đồ ghi chú: các trang nối với nhau qua liên kết [[...]]"
+        >
+          <Network className="w-4 h-4" />
         </button>
 
         {/* Thống kê thói quen */}

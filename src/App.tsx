@@ -16,6 +16,7 @@ import {
   DEFAULT_ORIENTATION
 } from './types/notebook';
 import { clampZoom, getPageSizeLabel } from './engine/PageGeometry';
+import { StencilTool } from './engine/StencilGeometry';
 import { PageOps, ClipboardPayload } from './engine/PageOps';
 import { InkRecognitionService, ModelStatus, MODEL_SIZE_LABEL } from './engine/InkRecognitionService';
 import { InkIndexer, IndexProgress } from './engine/InkIndexer';
@@ -38,6 +39,7 @@ import { AudioPlayerBar, SeekRequest } from './components/AudioPlayerBar';
 import { InkInputPad } from './components/InkInputPad';
 import { FlashcardReview } from './components/FlashcardReview';
 import { StatsModal } from './components/StatsModal';
+import { NoteGraphModal } from './components/NoteGraphModal';
 import { AlertTriangle, CheckCircle2, Loader2, X, ChevronLeft, ChevronRight, MousePointer2, Minimize2 } from 'lucide-react';
 
 const audioEngine = new AudioSyncEngine();
@@ -59,12 +61,14 @@ export const App: React.FC = () => {
   const [size, setSize] = useState<number>(4);
   const [fontFamily, setFontFamily] = useState<string>("'Caveat', cursive");
   const [smartShapeEnabled, setSmartShapeEnabled] = useState<boolean>(true);
-  const [rulerEnabled, setRulerEnabled] = useState<boolean>(false);
+  /** Khuôn vẽ đang dùng: thước kẻ, khuôn tròn, thước đo góc, lưới đẳng cự */
+  const [stencilTool, setStencilTool] = useState<StencilTool>('none');
   /** Trình chiếu: ẩn hết thanh công cụ, bút thành con trỏ laser */
   const [presentMode, setPresentMode] = useState<boolean>(false);
   /** Đảo màu trang để đọc/viết ban đêm */
   const [nightMode, setNightMode] = useState<boolean>(false);
   const [statsOpen, setStatsOpen] = useState<boolean>(false);
+  const [graphOpen, setGraphOpen] = useState<boolean>(false);
   const [palmRejectionActive, setPalmRejectionActive] = useState<boolean>(true);
 
   // Khung nhìn trang giấy
@@ -467,6 +471,21 @@ export const App: React.FC = () => {
           ? { ...n, pages: PageOps.reindex(pages), updatedAt: Date.now() }
           : n
       )
+    );
+  };
+
+  const handleRenamePage = (index: number, title: string) => {
+    const notebook = notebooksRef.current.find(n => n.id === activeNotebookId);
+    if (!notebook) return;
+
+    const pages = notebook.pages.map((p, i) =>
+      i === index ? { ...p, title: title.trim() || undefined } : p
+    );
+    commit(
+      notebooksRef.current.map(n =>
+        n.id === activeNotebookId ? { ...n, pages, updatedAt: Date.now() } : n
+      ),
+      `rename-page-${notebook.id}-${index}`
     );
   };
 
@@ -1397,8 +1416,8 @@ export const App: React.FC = () => {
         onChangeFontFamily={setFontFamily}
         smartShapeEnabled={smartShapeEnabled}
         onToggleSmartShape={() => setSmartShapeEnabled(!smartShapeEnabled)}
-        rulerEnabled={rulerEnabled}
-        onToggleRuler={() => setRulerEnabled(!rulerEnabled)}
+        stencilTool={stencilTool}
+        onChangeStencil={setStencilTool}
         palmRejectionActive={palmRejectionActive}
         onTogglePalmRejection={() => setPalmRejectionActive(!palmRejectionActive)}
         zoomLevel={zoomLevel}
@@ -1412,6 +1431,7 @@ export const App: React.FC = () => {
         nightMode={nightMode}
         onToggleNightMode={() => setNightMode(v => !v)}
         onOpenStats={() => setStatsOpen(true)}
+        onOpenGraph={() => setGraphOpen(true)}
       />}
 
       {/* 3. Main Drawing Canvas Area */}
@@ -1430,8 +1450,8 @@ export const App: React.FC = () => {
             size={size}
             fontFamily={fontFamily}
             smartShapeEnabled={smartShapeEnabled}
-            rulerEnabled={rulerEnabled}
-            onDisableRuler={() => setRulerEnabled(false)}
+            stencilTool={stencilTool}
+            onDisableStencil={() => setStencilTool('none')}
             palmRejectionActive={palmRejectionActive}
             zoomLevel={zoomLevel}
             onPageUpdate={applyPageUpdate}
@@ -1444,6 +1464,8 @@ export const App: React.FC = () => {
             inkInputTargetId={inkInputTargetId}
             onZoomChange={setZoomLevel}
             fitRequest={fitRequest}
+            allNotebooks={notebooks}
+            onFollowLink={handleJumpToSearchResult}
             laserMode={presentMode}
             nightMode={nightMode}
             onCreateFlashcard={handleCreateFlashcard}
@@ -1565,6 +1587,7 @@ export const App: React.FC = () => {
         onRenameNotebook={handleRenameNotebook}
         onChangeNotebookCategory={handleChangeNotebookCategory}
         onChangeNotebookCover={handleChangeNotebookCover}
+        onRenamePage={handleRenamePage}
         onDuplicatePage={handleDuplicatePage}
         onReorderPages={handleReorderPages}
         onMovePageToNotebook={handleMovePageToNotebook}
@@ -1621,6 +1644,14 @@ export const App: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* Bản đồ liên kết ghi chú */}
+      <NoteGraphModal
+        isOpen={graphOpen}
+        notebooks={notebooks}
+        onJump={handleJumpToSearchResult}
+        onClose={() => setGraphOpen(false)}
+      />
 
       {/* Thống kê thói quen */}
       <StatsModal isOpen={statsOpen} notebooks={notebooks} onClose={() => setStatsOpen(false)} />

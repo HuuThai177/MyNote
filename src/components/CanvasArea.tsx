@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
+  Notebook,
   Stroke,
   Point,
   ToolType,
@@ -18,6 +19,9 @@ import { LassoContextMenu } from './LassoContextMenu';
 import { InkToTextModal } from './InkToTextModal';
 import { TextElementToolbar } from './TextElementToolbar';
 import { RulerOverlay, RulerState, snapPointToRuler } from './RulerOverlay';
+import { CircleStencil, CircleStencilState } from './CircleStencil';
+import { StencilGeometry, StencilTool, ISOMETRIC_ANGLES } from '../engine/StencilGeometry';
+import { PageLinks } from '../engine/PageLinks';
 import {
   Grip,
   Trash2,
@@ -42,9 +46,12 @@ interface CanvasAreaProps {
   size: number;
   fontFamily: string;
   smartShapeEnabled: boolean;
-  /** Hiện thước kẻ trên trang; nét bút hút vào cạnh thước */
-  rulerEnabled: boolean;
-  onDisableRuler: () => void;
+  /** Cả thư viện, cần để phân giải liên kết [[...]] */
+  allNotebooks: Notebook[];
+  onFollowLink: (notebookId: string, pageIndex: number) => void;
+  /** Khuôn vẽ đang dùng; nét bút hút vào khuôn tương ứng */
+  stencilTool: StencilTool;
+  onDisableStencil: () => void;
   palmRejectionActive: boolean;
   zoomLevel: number;
   /** `coalesceKey` gộp một chuỗi thao tác liên tục thành 1 bước hoàn tác */
@@ -96,8 +103,10 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   size,
   fontFamily,
   smartShapeEnabled,
-  rulerEnabled,
-  onDisableRuler,
+  allNotebooks,
+  onFollowLink,
+  stencilTool,
+  onDisableStencil,
   palmRejectionActive,
   zoomLevel,
   onPageUpdate,
@@ -225,10 +234,12 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   /** Vị trí thước kẻ trên trang; null khi chưa bật */
   const [ruler, setRuler] = useState<RulerState | null>(null);
+  /** Khuôn tròn / thước đo góc */
+  const [circleStencil, setCircleStencil] = useState<CircleStencilState | null>(null);
 
-  // Bật thước thì đặt sẵn ở giữa trang, tắt thì cất đi
+  // Mỗi lần đổi khuôn thì đặt sẵn khuôn mới ở giữa trang và cất khuôn cũ
   useEffect(() => {
-    if (rulerEnabled) {
+    if (stencilTool === 'ruler') {
       setRuler(prev =>
         prev ?? {
           x: pageWidth / 2,
@@ -237,10 +248,22 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           length: Math.min(720, Math.max(280, pageWidth * 0.7))
         }
       );
+      setCircleStencil(null);
+    } else if (stencilTool === 'circle' || stencilTool === 'protractor') {
+      setRuler(null);
+      setCircleStencil(prev =>
+        prev ?? {
+          x: pageWidth / 2,
+          y: pageHeight * 0.4,
+          radius: Math.min(260, Math.max(90, pageWidth * 0.22)),
+          angle: 0
+        }
+      );
     } else {
       setRuler(null);
+      setCircleStencil(null);
     }
-  }, [rulerEnabled, pageWidth, pageHeight]);
+  }, [stencilTool, pageWidth, pageHeight]);
 
   /** Nét hiện tại đã được nắn thành hình chuẩn, không nhận thêm điểm nữa */
   const shapeSnappedRef = useRef(false);
@@ -656,12 +679,12 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       addTextElementAt(x, y);
     } else {
       shapeSnappedRef.current = false;
-      const startPoint = ruler ? (snapPointToRuler(pt, ruler) ?? pt) : pt;
+      const startPoint = snapToActiveStencil(pt) ?? pt;
       const first = { ...pt, x: startPoint.x, y: startPoint.y };
       setCurrentStroke([first]);
       currentStrokeRef.current = [first];
 
-      if (smartShapeEnabled && !ruler) {
+      if (smartShapeEnabled && stencilTool === 'none') {
         if (shapeHoldTimer.current) clearTimeout(shapeHoldTimer.current);
         shapeHoldTimer.current = setTimeout(triggerShapeSmooth, 500);
       }
@@ -798,19 +821,29 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       // Nét đã được nắn thành hình chuẩn thì giữ nguyên cho tới khi nhấc bút
       if (shapeSnappedRef.current) return;
 
-      // Có thước trên trang: nét bút bị hút vào cạnh thước khi vẽ đủ gần,
-      // ra ngoài tầm hút thì vẫn vẽ tự do như bình thường
-      if (ruler) {
-        const snapped = snapPointToRuler(pt, ruler);
-        if (snapped) {
-          setCurrentStroke(prev => [...prev, { ...pt, x: snapped.x, y: snapped.y }]);
-          return;
-        }
+      // Nét bút bị hút vào khuôn đang dùng khi vẽ đủ gần; ra ngoài tầm hút
+      // thì vẫn vẽ tự do như bình thường
+      const snapped = snapToActiveStencil(pt);
+      if (snapped) {
+        setCurrentStroke(prev => [...prev, { ...pt, x: snapped.x, y: snapped.y }]);
+        return;
+      }
+
+      // Lưới đẳng cự bắt theo HƯỚNG nét nên phải biết điểm đầu
+      if (stencilTool === 'isometric') {
+        setCurrentStroke(prev => {
+          const start = prev[0] ?? pt;
+          const axis = StencilGeometry.snapToAxes(start, pt, ISOMETRIC_ANGLES);
+          const next = [...prev, { ...pt, x: axis.x, y: axis.y }];
+          currentStrokeRef.current = next;
+          return next;
+        });
+        return;
       }
 
       setCurrentStroke(prev => [...prev, pt]);
 
-      if (smartShapeEnabled && !ruler && shapeHoldTimer.current) {
+      if (smartShapeEnabled && stencilTool === 'none' && shapeHoldTimer.current) {
         clearTimeout(shapeHoldTimer.current);
         // Hẹn lại sau mỗi lần bút dịch chuyển: chỉ khi bút ĐỨNG YÊN đủ lâu thì
         // bộ đếm mới bắn được.
@@ -1112,6 +1145,20 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       textarea?.focus();
       textarea?.setSelectionRange(position, position);
     });
+  };
+
+  /** Hút một điểm vào khuôn đang bật; null nghĩa là vẽ tự do */
+  const snapToActiveStencil = (pt: Point): { x: number; y: number } | null => {
+    if (ruler) return snapPointToRuler(pt, ruler);
+
+    if (circleStencil) {
+      const center = { x: circleStencil.x, y: circleStencil.y };
+      return stencilTool === 'protractor'
+        ? StencilGeometry.snapToProtractor(pt, center, circleStencil.radius, circleStencil.angle)
+        : StencilGeometry.snapToCircle(pt, center, circleStencil.radius);
+    }
+
+    return null;
   };
 
   /** Tìm nét vẽ gần điểm chạm nhất mà có mốc thời gian ghi âm */
@@ -1698,7 +1745,17 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           <RulerOverlay
             ruler={ruler}
             onChange={setRuler}
-            onClose={onDisableRuler}
+            onClose={onDisableStencil}
+            toCanvasPoint={toCanvasPoint}
+          />
+        )}
+
+        {circleStencil && (stencilTool === 'circle' || stencilTool === 'protractor') && (
+          <CircleStencil
+            state={circleStencil}
+            variant={stencilTool}
+            onChange={setCircleStencil}
+            onClose={onDisableStencil}
             toCanvasPoint={toCanvasPoint}
           />
         )}
@@ -1762,7 +1819,47 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
                 />
               )}
 
-              {/* Editable Text Area */}
+              {/* CHẾ ĐỘ ĐỌC — hiện liên kết [[...]] bấm được.
+                  Không thể render liên kết bên trong <textarea>, nên khi khung
+                  chữ không được chọn thì đổi sang <div> có phân tích liên kết. */}
+              {!isSelected && PageLinks.hasLink(txt.text) ? (
+                <div
+                  className="w-full h-full leading-snug font-medium overflow-hidden whitespace-pre-wrap"
+                  style={{
+                    fontFamily: txt.fontFamily,
+                    color: txt.color || '#1F2937',
+                    fontSize: `${txt.fontSize}px`,
+                    textAlign: txt.textAlign ?? 'left'
+                  }}
+                >
+                  {PageLinks.parse(txt.text, allNotebooks).map((segment, i) =>
+                    segment.type === 'text' ? (
+                      <span key={i}>{segment.content}</span>
+                    ) : segment.target ? (
+                      <button
+                        key={i}
+                        onClick={e => {
+                          e.stopPropagation();
+                          onFollowLink(segment.target!.notebookId, segment.target!.pageIndex);
+                        }}
+                        className="text-indigo-600 underline decoration-indigo-300 underline-offset-2 hover:decoration-indigo-600 font-semibold"
+                        style={{ fontSize: 'inherit', fontFamily: 'inherit' }}
+                        title={`Mở ${segment.target.label}`}
+                      >
+                        {segment.content}
+                      </button>
+                    ) : (
+                      <span
+                        key={i}
+                        className="text-amber-600 underline decoration-dotted decoration-amber-400"
+                        title="Chưa có trang nào tên này"
+                      >
+                        {segment.content}
+                      </span>
+                    )
+                  )}
+                </div>
+              ) : (
               <textarea
                 ref={el => {
                   if (el) textareaRefs.current.set(txt.id, el);
@@ -1782,6 +1879,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
                   textAlign: txt.textAlign ?? 'left'
                 }}
               />
+              )}
 
               {/* Bottom-Right Corner Resize Handle */}
               {isSelected && (

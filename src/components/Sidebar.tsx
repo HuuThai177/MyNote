@@ -80,6 +80,7 @@ interface SidebarProps {
   onChangeNotebookCategory: (notebookId: string, category: string) => void;
   onChangeNotebookCover: (notebookId: string, coverColor: string) => void;
   // Quản lý trang
+  onRenamePage: (index: number, title: string) => void;
   onDuplicatePage: (index: number) => void;
   onReorderPages: (from: number, to: number) => void;
   onMovePageToNotebook: (pageIndex: number, targetNotebookId: string) => void;
@@ -144,6 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRenameNotebook,
   onChangeNotebookCategory,
   onChangeNotebookCover,
+  onRenamePage,
   onDuplicatePage,
   onReorderPages,
   onMovePageToNotebook,
@@ -464,6 +466,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       }`}
                     >
                       <PageThumbnail page={pg} width={150} />
+
+                      {/* Tên trang — dùng làm đích cho liên kết [[...]] */}
+                      <input
+                        value={pg.title ?? ''}
+                        onChange={e => onRenamePage(index, e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        placeholder="Đặt tên trang…"
+                        className="w-full px-2 py-1 rounded-lg bg-white border border-slate-200 text-[11px] font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-indigo-400"
+                      />
 
                       <div className="w-full flex items-center justify-between gap-1 text-xs px-0.5 text-slate-700">
                         {/* Tay cầm kéo thả */}
