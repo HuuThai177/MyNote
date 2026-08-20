@@ -71,12 +71,21 @@ interface CanvasAreaProps {
   /** Đọc chữ trong ảnh đã chèn */
   onOcrImage: (imageId: string) => void;
   ocrBusyImageId: string | null;
+  /** Tạo thẻ ôn tập từ vùng đang khoanh */
+  onCreateFlashcard: (region: { x: number; y: number; width: number; height: number }, suggestedBack: string) => void;
+  isCreatingFlashcard: boolean;
+  /** Trình chiếu: nét bút thành con trỏ laser, không lưu lại */
+  laserMode: boolean;
+  /** Đảo màu trang để đọc ban đêm */
+  nightMode: boolean;
 }
 
 /** Cửa sổ thời gian (giây) quanh mốc đang phát để làm sáng nét vẽ */
 const PLAYBACK_HIGHLIGHT_WINDOW = 1.2;
 /** Lề quanh trang giấy trong vùng cuộn (px màn hình) */
 const SHEET_MARGIN = 28;
+/** Vệt laser tan sau bao lâu (ms) */
+const LASER_LIFETIME = 1500;
 /** Trần độ phân giải canvas để tablet không cạn RAM khi zoom sâu */
 const MAX_RENDER_SCALE = 2.5;
 
@@ -105,7 +114,11 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   readClipboard,
   hasClipboard,
   onOcrImage,
-  ocrBusyImageId
+  ocrBusyImageId,
+  onCreateFlashcard,
+  isCreatingFlashcard,
+  laserMode,
+  nightMode
 }) => {
   /** Lớp tĩnh: nét đã lưu — chỉ vẽ lại khi tập nét thay đổi */
   const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -197,6 +210,19 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   const shapeHoldTimer = useRef<NodeJS.Timeout | null>(null);
   const shapeHintTimer = useRef<NodeJS.Timeout | null>(null);
+  /** Vệt laser đang tan dần; không bao giờ được lưu vào trang */
+  const [laserTrails, setLaserTrails] = useState<{ id: string; points: Point[]; bornAt: number }[]>([]);
+
+  // Dọn vệt laser đã hết hạn
+  useEffect(() => {
+    if (laserTrails.length === 0) return;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setLaserTrails(prev => prev.filter(t => now - t.bornAt < LASER_LIFETIME));
+    }, 100);
+    return () => clearInterval(timer);
+  }, [laserTrails.length]);
+
   /** Vị trí thước kẻ trên trang; null khi chưa bật */
   const [ruler, setRuler] = useState<RulerState | null>(null);
 
@@ -456,7 +482,36 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
     ctx.clearRect(0, 0, pageWidth, pageHeight);
 
     if (currentStroke.length > 0) {
-      drawSingleStroke(ctx, currentStroke, color, size, currentTool);
+      // Nét đang vẽ ở chế độ laser hiện màu đỏ ngay từ đầu
+      drawSingleStroke(
+        ctx,
+        currentStroke,
+        laserMode ? '#ef4444' : color,
+        laserMode ? 6 : size,
+        laserMode ? 'pen' : currentTool
+      );
+    }
+
+    // Vệt laser đang tan dần
+    if (laserTrails.length > 0) {
+      const now = Date.now();
+      laserTrails.forEach(trail => {
+        const age = (now - trail.bornAt) / LASER_LIFETIME;
+        if (age >= 1) return;
+
+        ctx.save();
+        ctx.globalAlpha = 1 - age;
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = '#ef4444';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        trail.points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        ctx.stroke();
+        ctx.restore();
+      });
     }
 
     if (lassoPolygon.length > 1) {
@@ -485,7 +540,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   // Lớp động vẽ lại theo từng điểm bút — nhưng chỉ có đúng một nét trên đó
   useEffect(() => {
     renderDynamicLayer();
-  }, [currentStroke, lassoPolygon, renderScale, pageWidth, pageHeight, color, size, currentTool]);
+  }, [currentStroke, lassoPolygon, renderScale, pageWidth, pageHeight, color, size, currentTool, laserMode, laserTrails]);
 
   // Smooth Bezier Drawing
   const drawSingleStroke = (
@@ -889,6 +944,16 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           setCurrentStroke([]);
           return;
         }
+      }
+
+      // Chế độ laser: nét chỉ để chỉ trỏ khi trình chiếu, KHÔNG lưu vào trang
+      if (laserMode) {
+        setLaserTrails(prev => [
+          ...prev,
+          { id: `laser-${Date.now()}`, points: currentStroke, bornAt: Date.now() }
+        ]);
+        setCurrentStroke([]);
+        return;
       }
 
       // Normal Pen Drawing: Save permanent stroke on canvas
@@ -1454,7 +1519,10 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
               width: `${pageWidth}px`,
               height: `${pageHeight}px`,
               transform: `scale(${zoomLevel})`,
-              transformOrigin: 'top left'
+              transformOrigin: 'top left',
+              // Đảo màu cả tờ giấy; ảnh chèn được đảo ngược lại bên dưới nên
+              // vẫn hiện đúng màu thật thay vì thành ảnh âm bản
+              filter: nightMode ? 'invert(1) hue-rotate(180deg)' : undefined
             }}
           >
         {/* PDF Background */}
@@ -1463,6 +1531,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
             src={page.pdfDataUrl}
             alt="PDF Page"
             className="absolute inset-0 w-full h-full object-contain pointer-events-none opacity-90 z-0"
+            style={{ filter: nightMode ? 'invert(1) hue-rotate(180deg)' : undefined }}
           />
         )}
 
@@ -1485,6 +1554,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
               alt="Ảnh ghi chú"
               draggable={false}
               className="w-full h-full object-contain rounded-lg shadow-md select-none"
+              style={{ filter: nightMode ? 'invert(1) hue-rotate(180deg)' : undefined }}
             />
           </div>
         ))}
@@ -1744,6 +1814,17 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           onConvertToText={handleConvertToTextModal}
           isRecognizing={isRecognizingSelection}
           canRecognize={selectedStrokes.length > 0}
+          onCreateFlashcard={() => {
+            const bbox = getSelectionBounds(selectedStrokes, selectedTextIds, selectedImageIds);
+            // Chữ trong khung chữ được chọn dùng làm gợi ý cho mặt sau
+            const suggested = page.textElements
+              .filter(t => selectedTextIds.includes(t.id))
+              .map(t => t.text)
+              .join('\n');
+            onCreateFlashcard(bbox, suggested);
+            clearSelection();
+          }}
+          isCreatingFlashcard={isCreatingFlashcard}
           onCopy={handleCopy}
           onDuplicate={handleDuplicateSelection}
           onDeleteStrokes={handleDeleteSelectedStrokes}

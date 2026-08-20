@@ -20,6 +20,10 @@ import { PageOps, ClipboardPayload } from './engine/PageOps';
 import { InkRecognitionService, ModelStatus, MODEL_SIZE_LABEL } from './engine/InkRecognitionService';
 import { InkIndexer, IndexProgress } from './engine/InkIndexer';
 import { DocumentCapture } from './engine/DocumentCapture';
+import { SpeechTranscriber, TranscriptSegment } from './engine/SpeechTranscriber';
+import { FlashcardEngine, Flashcard, ReviewGrade } from './engine/FlashcardEngine';
+import { PageRenderer } from './engine/PageRenderer';
+import { getPageDimensions } from './engine/PageGeometry';
 import { StorageEngine, SaveResult } from './engine/StorageEngine';
 import { AudioSyncEngine } from './engine/AudioSyncEngine';
 import { HistoryEngine } from './engine/HistoryEngine';
@@ -32,7 +36,9 @@ import { ExportModal } from './components/ExportModal';
 import { SearchModal } from './components/SearchModal';
 import { AudioPlayerBar, SeekRequest } from './components/AudioPlayerBar';
 import { InkInputPad } from './components/InkInputPad';
-import { AlertTriangle, CheckCircle2, Loader2, X } from 'lucide-react';
+import { FlashcardReview } from './components/FlashcardReview';
+import { StatsModal } from './components/StatsModal';
+import { AlertTriangle, CheckCircle2, Loader2, X, ChevronLeft, ChevronRight, MousePointer2, Minimize2 } from 'lucide-react';
 
 const audioEngine = new AudioSyncEngine();
 
@@ -54,6 +60,11 @@ export const App: React.FC = () => {
   const [fontFamily, setFontFamily] = useState<string>("'Caveat', cursive");
   const [smartShapeEnabled, setSmartShapeEnabled] = useState<boolean>(true);
   const [rulerEnabled, setRulerEnabled] = useState<boolean>(false);
+  /** Trình chiếu: ẩn hết thanh công cụ, bút thành con trỏ laser */
+  const [presentMode, setPresentMode] = useState<boolean>(false);
+  /** Đảo màu trang để đọc/viết ban đêm */
+  const [nightMode, setNightMode] = useState<boolean>(false);
+  const [statsOpen, setStatsOpen] = useState<boolean>(false);
   const [palmRejectionActive, setPalmRejectionActive] = useState<boolean>(true);
 
   // Khung nhìn trang giấy
@@ -64,6 +75,10 @@ export const App: React.FC = () => {
   const [isRecordingAudio, setIsRecordingAudio] = useState<boolean>(false);
   const [recordingTime, setRecordingTime] = useState<number>(0);
   const [audioBarOpen, setAudioBarOpen] = useState<boolean>(false);
+  /** Bật phụ đề khi ghi âm (nhận dạng lời nói tiếng Việt) */
+  const [transcriptEnabled, setTranscriptEnabled] = useState<boolean>(true);
+  const [livePartial, setLivePartial] = useState<string>('');
+  const transcriptRef = useRef<TranscriptSegment[]>([]);
   const [audioSeekMode, setAudioSeekMode] = useState<boolean>(false);
   const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
   const [playbackTime, setPlaybackTime] = useState<number | null>(null);
@@ -292,8 +307,16 @@ export const App: React.FC = () => {
       }
     };
 
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPresentMode(false);
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleEscape);
+    };
   }, [handleUndo, handleRedo]);
 
   // ---------------------------------------------------------------------------
@@ -719,14 +742,45 @@ export const App: React.FC = () => {
         return;
       }
       const result = await audioEngine.startRecording();
-      if (result.ok) {
-        setIsRecordingAudio(true);
-        setToast({ type: 'info', message: 'Đang ghi âm — mọi nét viết từ giờ đều được gắn mốc thời gian.' });
-      } else {
+      if (!result.ok) {
         setToast({ type: 'error', message: result.error || 'Không bắt đầu ghi âm được.' });
+        return;
       }
+
+      setIsRecordingAudio(true);
+      transcriptRef.current = [];
+      setLivePartial('');
+
+      let transcriptNote = '';
+      if (transcriptEnabled) {
+        // Nhiều máy Android không cho ghi âm và nhận giọng nói cùng lúc.
+        // Thất bại ở đây KHÔNG được làm hỏng bản ghi — chỉ là không có phụ đề.
+        const speech = await SpeechTranscriber.start({
+          onSegment: text => {
+            transcriptRef.current = [
+              ...transcriptRef.current,
+              { time: audioEngine.getElapsedSeconds(), text }
+            ];
+            setLivePartial('');
+          },
+          onPartial: setLivePartial,
+          onFailure: () => setLivePartial('')
+        });
+
+        transcriptNote = speech.ok
+          ? ' Phụ đề đang chạy.'
+          : ' Không bật được phụ đề (máy có thể không cho ghi âm và nhận giọng nói cùng lúc) — vẫn ghi âm bình thường.';
+      }
+
+      setToast({
+        type: 'info',
+        message: 'Đang ghi âm — mọi nét viết từ giờ đều được gắn mốc thời gian.' + transcriptNote
+      });
       return;
     }
+
+    await SpeechTranscriber.stop();
+    setLivePartial('');
 
     const recording = await audioEngine.stopRecording();
     setIsRecordingAudio(false);
@@ -753,14 +807,19 @@ export const App: React.FC = () => {
       assetId,
       url: objectUrl,
       duration: recording.duration,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      transcript: transcriptRef.current.length > 0 ? transcriptRef.current : undefined
     };
 
     applyPageUpdate({ ...page, audioNotes: [...(page.audioNotes || []), newNote] });
     setAudioBarOpen(true);
     setToast({
       type: 'info',
-      message: `Đã lưu bản ghi ${Math.round(recording.duration)}s. Bật "Chạm nét nghe lại" rồi chạm vào nét vẽ để nghe đúng đoạn.`
+      message:
+        `Đã lưu bản ghi ${Math.round(recording.duration)}s` +
+        (transcriptRef.current.length > 0
+          ? ` kèm ${transcriptRef.current.length} câu phụ đề. Chạm một câu để nhảy tới đúng đoạn.`
+          : '. Bật "Chạm nét nghe lại" rồi chạm vào nét vẽ để nghe đúng đoạn.')
     });
   };
 
@@ -1029,6 +1088,77 @@ export const App: React.FC = () => {
   };
 
   // ---------------------------------------------------------------------------
+  // Thẻ ôn tập
+  // ---------------------------------------------------------------------------
+  const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [creatingFlashcard, setCreatingFlashcard] = useState(false);
+
+  useEffect(() => {
+    FlashcardEngine.loadAll().then(setFlashcards);
+  }, []);
+
+  const persistFlashcards = (next: Flashcard[]) => {
+    setFlashcards(next);
+    FlashcardEngine.saveAll(next);
+  };
+
+  const handleCreateFlashcard = async (
+    region: { x: number; y: number; width: number; height: number },
+    suggestedBack: string
+  ) => {
+    const page = readCurrentPage();
+    const notebook = notebooksRef.current.find(n => n.id === activeNotebookId);
+    if (!page || !notebook) return;
+
+    setCreatingFlashcard(true);
+    try {
+      const dims = getPageDimensions(page);
+      const canvas = await PageRenderer.renderRegion(page, dims.width, dims.height, region, 2);
+      const blob = await new Promise<Blob | null>(resolve =>
+        canvas.toBlob(resolve, 'image/jpeg', 0.85)
+      );
+      if (!blob) throw new Error('Không tạo được ảnh mặt trước');
+
+      // Ưu tiên chữ trong khung chữ được chọn; nếu không có thì lấy chỉ mục của trang
+      const back = suggestedBack.trim() || page.inkIndex?.text?.trim() || '';
+
+      const card = await FlashcardEngine.create({
+        frontBlob: blob,
+        backText: back,
+        notebookId: notebook.id,
+        notebookTitle: notebook.title,
+        pageId: page.id,
+        pageIndex: currentPageIndex
+      });
+
+      persistFlashcards([...flashcards, card]);
+      setToast({
+        type: 'info',
+        message: back
+          ? 'Đã tạo thẻ ôn tập. Mở Sổ Tay → Ôn tập để bắt đầu.'
+          : 'Đã tạo thẻ ôn tập nhưng chưa có đáp án — đánh chỉ mục trang này để tự điền mặt sau.'
+      });
+    } catch (e: any) {
+      setToast({ type: 'error', message: e?.message || 'Không tạo được thẻ ôn tập.' });
+    } finally {
+      setCreatingFlashcard(false);
+    }
+  };
+
+  const handleGradeFlashcard = (cardId: string, grade: ReviewGrade) => {
+    persistFlashcards(
+      flashcards.map(c => (c.id === cardId ? FlashcardEngine.grade(c, grade) : c))
+    );
+  };
+
+  const handleDeleteFlashcard = (cardId: string) => {
+    persistFlashcards(FlashcardEngine.remove(flashcards, cardId));
+  };
+
+  const dueCardCount = useMemo(() => FlashcardEngine.countDue(flashcards), [flashcards]);
+
+  // ---------------------------------------------------------------------------
   // Sao lưu & khôi phục toàn bộ thư viện
   // ---------------------------------------------------------------------------
   const [isBackingUp, setIsBackingUp] = useState(false);
@@ -1215,7 +1345,7 @@ export const App: React.FC = () => {
   return (
     <div className="relative w-full h-full flex flex-col overflow-hidden bg-slate-950">
       {/* 1. GoodNotes Top Navigation Header */}
-      <HeaderBar
+      {!presentMode && <HeaderBar
         notebook={activeNotebook}
         currentPageIndex={currentPageIndex}
         totalPages={activeNotebook?.pages.length || 1}
@@ -1223,6 +1353,9 @@ export const App: React.FC = () => {
         isRecording={isRecordingAudio}
         recordingTime={recordingTime}
         onToggleRecording={handleToggleRecording}
+        transcriptEnabled={transcriptEnabled}
+        onToggleTranscript={() => setTranscriptEnabled(v => !v)}
+        livePartial={livePartial}
         onImportPdf={handleImportPdf}
         onExportPage={() => setExportModalOpen(true)}
         onPrevPage={() => setCurrentPageIndex(prev => Math.max(0, prev - 1))}
@@ -1250,10 +1383,10 @@ export const App: React.FC = () => {
             return !prev;
           });
         }}
-      />
+      />}
 
       {/* 2. GoodNotes Sub-Header Floating Toolbar */}
-      <Toolbar
+      {!presentMode && <Toolbar
         currentTool={currentTool}
         onSelectTool={setCurrentTool}
         color={color}
@@ -1274,7 +1407,12 @@ export const App: React.FC = () => {
         onResetZoom={handleResetZoom}
         onFitWidth={() => requestFit('width')}
         onFitPage={() => requestFit('page')}
-      />
+        presentMode={presentMode}
+        onTogglePresentMode={() => setPresentMode(v => !v)}
+        nightMode={nightMode}
+        onToggleNightMode={() => setNightMode(v => !v)}
+        onOpenStats={() => setStatsOpen(true)}
+      />}
 
       {/* 3. Main Drawing Canvas Area */}
       <main className="flex-1 relative w-full h-full overflow-hidden bg-slate-200">
@@ -1306,6 +1444,10 @@ export const App: React.FC = () => {
             inkInputTargetId={inkInputTargetId}
             onZoomChange={setZoomLevel}
             fitRequest={fitRequest}
+            laserMode={presentMode}
+            nightMode={nightMode}
+            onCreateFlashcard={handleCreateFlashcard}
+            isCreatingFlashcard={creatingFlashcard}
             onOcrImage={handleOcrImage}
             ocrBusyImageId={ocrBusyImageId}
             onCopySelection={handleCopySelection}
@@ -1429,10 +1571,68 @@ export const App: React.FC = () => {
         inkModelStatus={inkModelStatus}
         onDownloadInkModel={handleDownloadInkModel}
         onDeleteInkModel={handleDeleteInkModel}
+        dueCardCount={dueCardCount}
+        onOpenReview={() => setReviewOpen(true)}
         inkIndexStats={inkIndexStats}
         indexProgress={indexProgress}
         onStartIndexing={handleStartIndexing}
         onStopIndexing={handleStopIndexing}
+      />
+
+      {/* Thanh nổi khi trình chiếu */}
+      {presentMode && (
+        <div className="chrome-bar chrome-bar-float fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 px-2 py-1.5 rounded-2xl border animate-pop">
+          <button
+            onClick={() => setCurrentPageIndex(prev => Math.max(0, prev - 1))}
+            disabled={currentPageIndex === 0}
+            className="chrome-btn w-9 h-9"
+            title="Trang trước"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="px-2 text-xs font-bold text-slate-700 tabular-nums">
+            {currentPageIndex + 1} / {activeNotebook?.pages.length || 1}
+          </span>
+          <button
+            onClick={() =>
+              setCurrentPageIndex(prev => Math.min((activeNotebook?.pages.length || 1) - 1, prev + 1))
+            }
+            disabled={currentPageIndex >= (activeNotebook?.pages.length || 1) - 1}
+            className="chrome-btn w-9 h-9"
+            title="Trang sau"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+
+          <div className="w-px h-5 bg-slate-200 mx-1" />
+
+          <span className="flex items-center gap-1.5 px-2 text-[11px] font-bold text-rose-600">
+            <MousePointer2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Bút = laser</span>
+          </span>
+
+          <button
+            onClick={() => setPresentMode(false)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-700 transition"
+            title="Thoát trình chiếu (Esc)"
+          >
+            <Minimize2 className="w-3.5 h-3.5" />
+            <span>Thoát</span>
+          </button>
+        </div>
+      )}
+
+      {/* Thống kê thói quen */}
+      <StatsModal isOpen={statsOpen} notebooks={notebooks} onClose={() => setStatsOpen(false)} />
+
+      {/* Ôn tập thẻ */}
+      <FlashcardReview
+        isOpen={reviewOpen}
+        cards={flashcards}
+        onGrade={handleGradeFlashcard}
+        onDelete={handleDeleteFlashcard}
+        onJumpToSource={handleJumpToSearchResult}
+        onClose={() => setReviewOpen(false)}
       />
 
       {/* Tìm kiếm toàn bộ sổ tay */}

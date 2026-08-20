@@ -14,7 +14,9 @@ import {
   ImagePlus,
   AudioLines,
   Loader2,
-  ScanLine
+  ScanLine,
+  Captions,
+  CaptionsOff
 } from 'lucide-react';
 import { Notebook } from '../types/notebook';
 
@@ -26,6 +28,10 @@ interface HeaderBarProps {
   isRecording: boolean;
   recordingTime: number;
   onToggleRecording: () => void;
+  transcriptEnabled: boolean;
+  onToggleTranscript: () => void;
+  /** Chữ đang nghe dở, hiện trực tiếp khi ghi âm */
+  livePartial: string;
   onImportPdf: () => void;
   onExportPage: () => void;
   onPrevPage: () => void;
@@ -60,6 +66,9 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   isRecording,
   recordingTime,
   onToggleRecording,
+  transcriptEnabled,
+  onToggleTranscript,
+  livePartial,
   onImportPdf,
   onExportPage,
   onPrevPage,
@@ -95,7 +104,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   // đều tạo stacking context riêng; nếu cùng z-index thì cái đứng sau trong DOM
   // sẽ đè lên, khiến menu thả xuống của header bị che mất.
   return (
-    <header className="chrome-bar chrome-bar-top h-14 w-full border-b px-3 flex items-center justify-between gap-3 z-40 select-none shrink-0">
+    <header className="chrome-bar chrome-bar-top relative h-14 w-full border-b px-3 flex items-center justify-between gap-3 z-40 select-none shrink-0">
       {/* ---------- Trái: điều hướng & tiêu đề ---------- */}
       <div className="flex items-center gap-2 min-w-0">
         <button
@@ -187,6 +196,24 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             </span>
           </button>
         )}
+
+        {/* Bật/tắt phụ đề — chỉ đổi được khi chưa ghi */}
+        <button
+          onClick={onToggleTranscript}
+          disabled={isRecording}
+          className={`w-9 h-9 rounded-xl border flex items-center justify-center transition disabled:opacity-50 ${
+            transcriptEnabled
+              ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+              : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+          }`}
+          title={
+            transcriptEnabled
+              ? 'Ghi âm kèm phụ đề tiếng Việt — tắt nếu máy không cho ghi âm và nhận giọng nói cùng lúc'
+              : 'Chỉ ghi âm, không làm phụ đề'
+          }
+        >
+          {transcriptEnabled ? <Captions className="w-[18px] h-[18px]" /> : <CaptionsOff className="w-[18px] h-[18px]" />}
+        </button>
 
         {/* Ghi âm đồng bộ nét vẽ */}
         <button
@@ -289,6 +316,13 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           <Download className="w-[18px] h-[18px] text-emerald-600" />
         </button>
       </div>
+
+      {/* Chữ đang nghe được, hiện trực tiếp để biết phụ đề có chạy hay không */}
+      {isRecording && livePartial && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 max-w-[min(560px,90vw)] px-3 py-1.5 rounded-full bg-slate-900/90 text-white text-xs font-medium truncate shadow-lg z-50 pointer-events-none">
+          {livePartial}
+        </div>
+      )}
     </header>
   );
 };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Trash2, X, ZoomIn, ZoomOut, Move, Loader2, Copy, CopyPlus } from 'lucide-react';
+import { Sparkles, Trash2, X, ZoomIn, ZoomOut, Move, Loader2, Copy, CopyPlus, GraduationCap } from 'lucide-react';
 
 interface LassoContextMenuProps {
   x: number;
@@ -9,6 +9,8 @@ interface LassoContextMenuProps {
   isRecognizing: boolean;
   /** Chỉ nhận diện được khi vùng khoanh có nét viết tay */
   canRecognize: boolean;
+  onCreateFlashcard: () => void;
+  isCreatingFlashcard: boolean;
   onCopy: () => void;
   onDuplicate: () => void;
   onDeleteStrokes: () => void;
@@ -22,6 +24,8 @@ export const LassoContextMenu: React.FC<LassoContextMenuProps> = ({
   onConvertToText,
   isRecognizing,
   canRecognize,
+  onCreateFlashcard,
+  isCreatingFlashcard,
   onCopy,
   onDuplicate,
   onDeleteStrokes,
@@ -83,6 +87,20 @@ export const LassoContextMenu: React.FC<LassoContextMenuProps> = ({
             <span>Nhận diện chữ</span>
           </>
         )}
+      </button>
+
+      <button
+        onClick={onCreateFlashcard}
+        disabled={isCreatingFlashcard}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-emerald-700 border border-slate-200 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 font-bold text-xs transition disabled:opacity-60"
+        title="Tạo thẻ ôn tập: mặt trước là chính nét chữ này"
+      >
+        {isCreatingFlashcard ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        ) : (
+          <GraduationCap className="w-3.5 h-3.5" />
+        )}
+        <span className="hidden sm:inline">Tạo thẻ</span>
       </button>
 
       <div className="chrome-group flex items-center p-0.5">

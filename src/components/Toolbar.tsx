@@ -22,7 +22,10 @@ import {
   Star,
   Plus,
   X,
-  Ruler
+  Ruler,
+  Presentation,
+  Moon,
+  BarChart3
 } from 'lucide-react';
 import { ToolType, VIETNAMESE_HANDWRITING_FONTS } from '../types/notebook';
 
@@ -49,6 +52,11 @@ interface ToolbarProps {
   onResetZoom: () => void;
   onFitWidth: () => void;
   onFitPage: () => void;
+  presentMode: boolean;
+  onTogglePresentMode: () => void;
+  nightMode: boolean;
+  onToggleNightMode: () => void;
+  onOpenStats: () => void;
 }
 
 /** Sáu màu hay dùng nhất, luôn hiện sẵn trên thanh công cụ */
@@ -110,7 +118,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onZoomOut,
   onResetZoom,
   onFitWidth,
-  onFitPage
+  onFitPage,
+  presentMode,
+  onTogglePresentMode,
+  nightMode,
+  onToggleNightMode,
+  onOpenStats
 }) => {
   const [showFontPicker, setShowFontPicker] = useState(false);
   const [showColorPanel, setShowColorPanel] = useState(false);
@@ -545,6 +558,35 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <Scan className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {/* Đảo màu ban đêm */}
+        <button
+          onClick={onToggleNightMode}
+          className={`chrome-btn w-9 h-9 border ${
+            nightMode ? 'bg-slate-900 text-amber-300 border-slate-900' : 'border-slate-200'
+          }`}
+          title="Đảo màu trang để đọc và viết ban đêm — chỉ đổi cách hiển thị, không đụng vào dữ liệu"
+        >
+          <Moon className="w-4 h-4" />
+        </button>
+
+        {/* Trình chiếu */}
+        <button
+          onClick={onTogglePresentMode}
+          className="chrome-btn w-9 h-9 border border-slate-200"
+          title="Trình chiếu: ẩn hết thanh công cụ, bút thành con trỏ laser (Esc để thoát)"
+        >
+          <Presentation className="w-4 h-4" />
+        </button>
+
+        {/* Thống kê thói quen */}
+        <button
+          onClick={onOpenStats}
+          className="chrome-btn w-9 h-9 border border-slate-200"
+          title="Thói quen ghi chép: chuỗi ngày viết, lịch nhiệt, tổng nét"
+        >
+          <BarChart3 className="w-4 h-4" />
+        </button>
 
         {/* Thu gọn thanh công cụ */}
         <button

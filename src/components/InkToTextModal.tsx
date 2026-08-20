@@ -55,9 +55,41 @@ export const InkToTextModal: React.FC<InkToTextModalProps> = ({
   };
 
   // Voice Assistant (Speech to Text)
-  const handleVoiceInput = () => {
+  const handleVoiceInput = async () => {
+    // Ưu tiên plugin native: Android WebView KHÔNG có Web Speech API, nên nút
+    // này trước đây im lặng không làm gì trên bản đóng gói.
+    try {
+      const { Capacitor } = await import('@capacitor/core');
+      if (Capacitor.isNativePlatform()) {
+        const { SpeechRecognition } = await import('@capgo/capacitor-speech-recognition');
+        const permission = await SpeechRecognition.requestPermissions();
+        if (permission.speechRecognition !== 'granted') {
+          alert('Bạn chưa cấp quyền nhận dạng giọng nói.');
+          return;
+        }
+
+        setIsListening(true);
+        try {
+          const result = await SpeechRecognition.start({
+            language: 'vi-VN',
+            popup: true,
+            partialResults: false,
+            maxResults: 1
+          });
+          const spoken = (result as any)?.matches?.[0];
+          if (spoken) setText(spoken);
+        } finally {
+          setIsListening(false);
+        }
+        return;
+      }
+    } catch (e) {
+      setIsListening(false);
+      console.warn('Nhận dạng giọng nói native thất bại:', e);
+    }
+
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      alert('Trình duyệt của bạn không hỗ trợ Speech Recognition. Bạn có thể gõ trực tiếp chữ vào ô bên dưới!');
+      alert('Thiết bị này không hỗ trợ nhận dạng giọng nói. Bạn có thể gõ trực tiếp chữ vào ô bên dưới.');
       return;
     }
 

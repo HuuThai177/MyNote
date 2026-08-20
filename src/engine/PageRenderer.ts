@@ -128,6 +128,41 @@ export class PageRenderer {
     return canvas;
   }
 
+  /**
+   * Cắt một vùng của trang thành ảnh riêng — dùng cho mặt trước thẻ ôn tập.
+   * Vẽ nguyên trang rồi mới cắt, nhờ vậy nét mực, khung chữ và ảnh đều hiện
+   * đúng như trên màn hình.
+   */
+  public static async renderRegion(
+    page: NotebookPage,
+    pageWidth: number,
+    pageHeight: number,
+    region: { x: number; y: number; width: number; height: number },
+    scale = 2
+  ): Promise<HTMLCanvasElement> {
+    const full = await this.renderPage(page, pageWidth, pageHeight, scale);
+
+    const padding = 12 * scale;
+    const sx = Math.max(0, region.x * scale - padding);
+    const sy = Math.max(0, region.y * scale - padding);
+    const sw = Math.min(full.width - sx, region.width * scale + padding * 2);
+    const sh = Math.min(full.height - sy, region.height * scale + padding * 2);
+
+    const cropped = document.createElement('canvas');
+    cropped.width = Math.max(1, Math.round(sw));
+    cropped.height = Math.max(1, Math.round(sh));
+
+    const ctx = cropped.getContext('2d');
+    if (!ctx) throw new Error('Không cắt được vùng ảnh');
+
+    // Nền trắng để thẻ không bị trong suốt khi xem lại
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, cropped.width, cropped.height);
+    ctx.drawImage(full, sx, sy, sw, sh, 0, 0, cropped.width, cropped.height);
+
+    return cropped;
+  }
+
   private static measureContentBounds(page: NotebookPage) {
     let maxX = 0;
     let maxY = 0;

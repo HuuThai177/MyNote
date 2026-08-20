@@ -15,7 +15,7 @@ interface SearchHit {
   category: string;
   pageIndex: number;
   snippet: string;
-  matchedIn: 'title' | 'text' | 'ink';
+  matchedIn: 'title' | 'text' | 'ink' | 'speech';
   strokeCount: number;
   imageCount: number;
   audioCount: number;
@@ -84,6 +84,13 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, notebooks, onJ
         const inkText = page.inkIndex?.text || '';
         const inkMatches = inkText.length > 0 && normalizeVi(inkText).includes(needle);
 
+        // Lời giảng đã ghi âm và nhận dạng thành phụ đề
+        const speechText = (page.audioNotes || [])
+          .flatMap(note => note.transcript || [])
+          .map(seg => seg.text)
+          .join(' ');
+        const speechMatches = speechText.length > 0 && normalizeVi(speechText).includes(needle);
+
         if (matchingTexts.length > 0) {
           matchingTexts.forEach(t => {
             results.push({ ...base, matchedIn: 'text', snippet: buildSnippet(t.text, needle) });
@@ -93,7 +100,13 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, notebooks, onJ
           }
         } else if (inkMatches) {
           results.push({ ...base, matchedIn: 'ink', snippet: buildSnippet(inkText, needle) });
-        } else if (titleMatches && pageIndex === 0) {
+        }
+
+        if (speechMatches) {
+          results.push({ ...base, matchedIn: 'speech', snippet: buildSnippet(speechText, needle) });
+        }
+
+        if (!matchingTexts.length && !inkMatches && !speechMatches && titleMatches && pageIndex === 0) {
           // Khớp tên sổ tay: chỉ trả về một kết quả đại diện ở trang đầu
           results.push({
             ...base,
@@ -179,11 +192,13 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, notebooks, onJ
               }}
               className="w-full text-left px-4 py-3 border-b border-slate-200 hover:bg-indigo-50 transition group flex items-start gap-3"
             >
-              <div className="p-2 rounded-lg bg-slate-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-slate-900 transition shrink-0 mt-0.5">
+              <div className="p-2 rounded-lg bg-slate-100 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition shrink-0 mt-0.5">
                 {hit.matchedIn === 'title' ? (
                   <BookOpen className="w-4 h-4" />
                 ) : hit.matchedIn === 'ink' ? (
                   <Pencil className="w-4 h-4" />
+                ) : hit.matchedIn === 'speech' ? (
+                  <AudioLines className="w-4 h-4" />
                 ) : (
                   <FileText className="w-4 h-4" />
                 )}
@@ -199,6 +214,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({ isOpen, notebooks, onJ
                   {hit.matchedIn === 'ink' && (
                     <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-bold shrink-0">
                       chữ viết tay
+                    </span>
+                  )}
+                  {hit.matchedIn === 'speech' && (
+                    <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] font-bold shrink-0">
+                      lời giảng
                     </span>
                   )}
                 </div>

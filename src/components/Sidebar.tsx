@@ -29,7 +29,8 @@ import {
   WifiOff,
   Wifi,
   Search,
-  Square
+  Square,
+  GraduationCap
 } from 'lucide-react';
 import {
   Notebook,
@@ -87,6 +88,9 @@ interface SidebarProps {
   onDownloadInkModel: () => void;
   onDeleteInkModel: () => void;
   // Chỉ mục tìm kiếm chữ viết tay
+  /** Số thẻ ôn tập đã tới hạn */
+  dueCardCount: number;
+  onOpenReview: () => void;
   inkIndexStats: { indexed: number; total: number };
   indexProgress: { done: number; total: number; currentNotebook: string } | null;
   onStartIndexing: () => void;
@@ -146,6 +150,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   inkModelStatus,
   onDownloadInkModel,
   onDeleteInkModel,
+  dueCardCount,
+  onOpenReview,
   inkIndexStats,
   indexProgress,
   onStartIndexing,
@@ -681,6 +687,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </div>
           )}
+        </div>
+
+        {/* CHÂN: ÔN TẬP */}
+        <div className="shrink-0 px-3 pb-2">
+          <button
+            onClick={onOpenReview}
+            className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border transition text-left ${
+              dueCardCount > 0
+                ? 'bg-indigo-50 border-indigo-300 hover:bg-indigo-100'
+                : 'bg-white border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <GraduationCap
+              className={`w-4 h-4 shrink-0 ${dueCardCount > 0 ? 'text-indigo-600' : 'text-slate-400'}`}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-bold text-slate-800">
+                {dueCardCount > 0 ? `Ôn tập ${dueCardCount} thẻ hôm nay` : 'Ôn tập'}
+              </p>
+              <p className="text-[10px] text-slate-500 leading-snug">
+                Khoanh nét chữ trên trang rồi bấm "Tạo thẻ"
+              </p>
+            </div>
+            {dueCardCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold shrink-0">
+                {dueCardCount}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* CHÂN: CHỈ MỤC TÌM KIẾM CHỮ VIẾT TAY */}

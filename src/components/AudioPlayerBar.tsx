@@ -7,7 +7,8 @@ import {
   MousePointerClick,
   AudioLines,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Captions
 } from 'lucide-react';
 import { AudioNote } from '../types/notebook';
 
@@ -46,6 +47,7 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [showTranscript, setShowTranscript] = useState(true);
 
   const safeIndex = Math.min(activeIndex, Math.max(0, notes.length - 1));
   const activeNote = notes[safeIndex] ?? null;
@@ -187,6 +189,22 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({
           </div>
         )}
 
+        {/* Bật/tắt bảng phụ đề */}
+        {(activeNote?.transcript?.length ?? 0) > 0 && (
+          <button
+            onClick={() => setShowTranscript(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition shrink-0 ${
+              showTranscript
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            }`}
+            title="Hiện lời nói đã nhận dạng, chạm một câu để nhảy tới đúng đoạn"
+          >
+            <Captions className="w-4 h-4" />
+            <span className="hidden sm:inline">{activeNote?.transcript?.length} câu</span>
+          </button>
+        )}
+
         {/* Bật chế độ chạm nét vẽ để nghe lại đúng đoạn */}
         <button
           onClick={onToggleSeekMode}
@@ -223,6 +241,43 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({
           <X className="w-4 h-4" />
         </button>
       </div>
+
+      {/* PHỤ ĐỀ — chạm một câu để nhảy audio tới đúng giây đó.
+          Vì nét vẽ cũng mang mốc thời gian, những nét viết lúc ấy sẽ sáng lên. */}
+      {showTranscript && (activeNote?.transcript?.length ?? 0) > 0 && (
+        <div className="mt-2.5 pt-2.5 border-t border-slate-200 max-h-40 overflow-y-auto space-y-0.5">
+          {activeNote!.transcript!.map((segment, index) => {
+            const next = activeNote!.transcript![index + 1];
+            const isActive =
+              currentTime >= segment.time && (!next || currentTime < next.time);
+
+            return (
+              <button
+                key={`${segment.time}-${index}`}
+                onClick={() => handleScrub(segment.time)}
+                className={`w-full text-left flex items-start gap-2.5 px-2 py-1.5 rounded-lg transition ${
+                  isActive ? 'bg-indigo-50 ring-1 ring-indigo-200' : 'hover:bg-slate-50'
+                }`}
+              >
+                <span
+                  className={`text-[10px] font-bold tabular-nums shrink-0 mt-0.5 ${
+                    isActive ? 'text-indigo-600' : 'text-slate-400'
+                  }`}
+                >
+                  {formatTime(segment.time)}
+                </span>
+                <span
+                  className={`text-xs leading-snug ${
+                    isActive ? 'text-slate-900 font-medium' : 'text-slate-600'
+                  }`}
+                >
+                  {segment.text}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

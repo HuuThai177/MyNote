@@ -155,6 +155,12 @@ export interface ImageElement {
   assetId?: string;
 }
 
+/** Một câu trong phụ đề, kèm mốc thời gian tính từ lúc bắt đầu ghi */
+export interface TranscriptSegment {
+  time: number;
+  text: string;
+}
+
 export interface AudioNote {
   id: string;
   title?: string;
@@ -164,6 +170,8 @@ export interface AudioNote {
   assetId?: string;
   duration: number; // in seconds
   createdAt: number;
+  /** Phụ đề lời nói, có mốc thời gian để nhảy tới đúng đoạn */
+  transcript?: TranscriptSegment[];
 }
 
 /** Chữ viết tay của một trang sau khi đã nhận diện, phục vụ tìm kiếm */
