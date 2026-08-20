@@ -175,7 +175,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
   // Lasso chọn được cả khung chữ và ảnh, không chỉ nét vẽ
   const [selectedTextIds, setSelectedTextIds] = useState<string[]>([]);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
-  const [lassoMenuPos, setLassoMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [lassoMenuPos, setLassoMenuPos] = useState<{ x: number; top: number; bottom: number } | null>(null);
 
   const selectionCount = selectedStrokes.length + selectedTextIds.length + selectedImageIds.length;
 
@@ -738,7 +738,11 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       );
 
       if (lassoMenuPos) {
-        setLassoMenuPos({ x: lassoMenuPos.x + dx * zoomLevel, y: lassoMenuPos.y + dy * zoomLevel });
+        setLassoMenuPos({
+          x: lassoMenuPos.x + dx * zoomLevel,
+          top: lassoMenuPos.top + dy * zoomLevel,
+          bottom: lassoMenuPos.bottom + dy * zoomLevel
+        });
       }
       return;
     }
@@ -946,7 +950,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
 
       if (strokes.length + textIds.length + imageIds.length > 0) {
         const bbox = getSelectionBounds(strokes, textIds, imageIds);
-        setLassoMenuPos(toClientPoint(bbox.x + bbox.width / 2, bbox.y));
+        setLassoMenuPos(menuAnchorFor(bbox));
       } else {
         setLassoPolygon([]);
       }
@@ -973,7 +977,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
           setSelectedImageIds(imageIds);
           setLassoPolygon(circlePoly);
           const bbox = getSelectionBounds(strokes, textIds, imageIds);
-          setLassoMenuPos(toClientPoint(bbox.x + bbox.width / 2, bbox.y));
+          setLassoMenuPos(menuAnchorFor(bbox));
           setCurrentStroke([]);
           return;
         }
@@ -1077,7 +1081,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       y: scaleAround(bbox.y, centerY),
       width: bbox.width * scaleFactor
     };
-    setLassoMenuPos(toClientPoint(scaledBbox.x + scaledBbox.width / 2, scaledBbox.y));
+    setLassoMenuPos(menuAnchorFor({ ...scaledBbox, height: bbox.height * scaleFactor }));
   };
 
   // Eraser collision
@@ -1193,6 +1197,17 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       x: (clientX - rect.left) * (pageWidth / rect.width),
       y: (clientY - rect.top) * (pageHeight / rect.height)
     };
+  };
+
+  /**
+   * Vị trí neo của menu lasso: tâm ngang cùng mép trên và mép dưới của vùng
+   * chọn. Menu cần cả hai mép để tự quyết định đặt phía trên hay phía dưới.
+   */
+  const menuAnchorFor = (bbox: { x: number; y: number; width: number; height: number }) => {
+    const centerX = bbox.x + bbox.width / 2;
+    const topPoint = toClientPoint(centerX, bbox.y);
+    const bottomPoint = toClientPoint(centerX, bbox.y + bbox.height);
+    return { x: topPoint.x, top: topPoint.y, bottom: bottomPoint.y };
   };
 
   /** Toạ độ trang giấy -> toạ độ màn hình (cho menu dùng position: fixed) */
@@ -1446,7 +1461,7 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       { x: bbox.x + bbox.width + 8, y: bbox.y + bbox.height + 8 },
       { x: bbox.x - 8, y: bbox.y + bbox.height + 8 }
     ]);
-    setLassoMenuPos(toClientPoint(bbox.x + bbox.width / 2, bbox.y - 8));
+    setLassoMenuPos(menuAnchorFor(bbox));
   };
 
   const handlePaste = () => pasteClipboard(readClipboard());
@@ -1908,7 +1923,8 @@ export const CanvasArea: React.FC<CanvasAreaProps> = ({
       {lassoMenuPos && (
         <LassoContextMenu
           x={lassoMenuPos.x}
-          y={lassoMenuPos.y}
+          top={lassoMenuPos.top}
+          bottom={lassoMenuPos.bottom}
           onConvertToText={handleConvertToTextModal}
           isRecognizing={isRecognizingSelection}
           canRecognize={selectedStrokes.length > 0}

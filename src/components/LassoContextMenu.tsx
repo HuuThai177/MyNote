@@ -1,9 +1,23 @@
-import React from 'react';
-import { Sparkles, Trash2, X, ZoomIn, ZoomOut, Move, Loader2, Copy, CopyPlus, GraduationCap } from 'lucide-react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
+import {
+  Sparkles,
+  Trash2,
+  X,
+  ZoomIn,
+  ZoomOut,
+  Move,
+  Loader2,
+  Copy,
+  CopyPlus,
+  GraduationCap
+} from 'lucide-react';
 
 interface LassoContextMenuProps {
+  /** Tâm ngang của vùng khoanh, toạ độ màn hình */
   x: number;
-  y: number;
+  /** Mép trên và mép dưới của vùng khoanh, để menu biết nên đặt trên hay dưới */
+  top: number;
+  bottom: number;
   onConvertToText: () => void;
   /** Đang gọi dịch vụ nhận diện — đây là một request mạng, không tức thì */
   isRecognizing: boolean;
@@ -18,9 +32,13 @@ interface LassoContextMenuProps {
   onClose: () => void;
 }
 
+const MARGIN = 12;
+const GAP = 10;
+
 export const LassoContextMenu: React.FC<LassoContextMenuProps> = ({
   x,
-  y,
+  top,
+  bottom,
   onConvertToText,
   isRecognizing,
   canRecognize,
@@ -32,12 +50,59 @@ export const LassoContextMenu: React.FC<LassoContextMenuProps> = ({
   onScaleSelected,
   onClose
 }) => {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [placement, setPlacement] = useState<{ left: number; top: number } | null>(null);
+
+  /**
+   * Đo kích thước THẬT của menu rồi mới đặt vị trí.
+   *
+   * Bản trước kẹp theo một bề rộng đoán cứng 340px, trong khi menu đã phình lên
+   * gần gấp đôi vì thêm nút "Tạo thẻ" và cụm sao chép — nên khoanh vùng sát mép
+   * phải là menu tràn ra ngoài màn hình, mất luôn nút Xoá và Đóng. Thêm nữa,
+   * `left` nhận thẳng TÂM vùng khoanh làm mép trái nên menu luôn lệch hẳn sang
+   * phải thay vì nằm giữa vùng chọn.
+   */
+  useLayoutEffect(() => {
+    const element = menuRef.current;
+    if (!element) return;
+
+    const place = () => {
+      const width = element.offsetWidth;
+      const height = element.offsetHeight;
+
+      // Canh giữa theo vùng khoanh rồi kẹp vào trong màn hình
+      const left = Math.max(
+        MARGIN,
+        Math.min(x - width / 2, window.innerWidth - width - MARGIN)
+      );
+
+      // Ưu tiên đặt phía trên vùng khoanh; không đủ chỗ thì lật xuống dưới
+      const above = top - GAP - height;
+      const below = bottom + GAP;
+      const nextTop =
+        above >= MARGIN
+          ? above
+          : below + height <= window.innerHeight - MARGIN
+            ? below
+            : Math.max(MARGIN, window.innerHeight - height - MARGIN);
+
+      setPlacement({ left, top: nextTop });
+    };
+
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [x, top, bottom]);
+
   return (
     <div
-      className="chrome-bar chrome-bar-float fixed z-40 px-2 py-1.5 rounded-2xl flex items-center gap-1.5 border animate-pop select-none"
+      ref={menuRef}
+      className="chrome-bar chrome-bar-float fixed z-40 px-2 py-1.5 rounded-2xl flex flex-wrap items-center justify-center gap-1.5 border animate-pop select-none"
       style={{
-        left: `${Math.min(window.innerWidth - 340, Math.max(20, x))}px`,
-        top: `${Math.max(80, y - 60)}px`
+        // Màn hình hẹp thì menu tự xuống dòng thay vì bị cắt mất nút
+        maxWidth: `calc(100vw - ${MARGIN * 2}px)`,
+        left: placement ? `${placement.left}px` : '-9999px',
+        top: placement ? `${placement.top}px` : '-9999px'
       }}
     >
       {/* Nhắc thao tác kéo */}
