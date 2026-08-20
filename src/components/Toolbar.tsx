@@ -30,7 +30,8 @@ import {
   Triangle,
   Grid3x3,
   Ban,
-  Network
+  Network,
+  MoreHorizontal
 } from 'lucide-react';
 import { ToolType, VIETNAMESE_HANDWRITING_FONTS } from '../types/notebook';
 import { StencilTool } from '../engine/StencilGeometry';
@@ -91,6 +92,20 @@ const STENCILS: { id: StencilTool; icon: React.ElementType; name: string; hint: 
   { id: 'isometric', icon: Grid3x3, name: 'Lưới đẳng cự', hint: 'Mọi nét theo 30° / 90° / 150°' }
 ];
 
+const EXTRAS: {
+  id: 'fitWidth' | 'fitPage' | 'night' | 'present' | 'graph' | 'stats';
+  icon: React.ElementType;
+  name: string;
+  hint: string;
+}[] = [
+  { id: 'fitWidth', icon: StretchHorizontal, name: 'Vừa chiều ngang', hint: 'Canh trang khớp bề ngang khung nhìn' },
+  { id: 'fitPage', icon: Scan, name: 'Vừa toàn trang', hint: 'Thu cả trang vào trong khung nhìn' },
+  { id: 'night', icon: Moon, name: 'Đảo màu ban đêm', hint: 'Giấy tối chữ sáng, ảnh giữ màu thật' },
+  { id: 'present', icon: Presentation, name: 'Trình chiếu', hint: 'Ẩn thanh công cụ, bút thành laser' },
+  { id: 'graph', icon: Network, name: 'Bản đồ ghi chú', hint: 'Các trang nối nhau qua [[liên kết]]' },
+  { id: 'stats', icon: BarChart3, name: 'Thói quen ghi chép', hint: 'Lịch nhiệt và chuỗi ngày viết' }
+];
+
 const PEN_SIZES = [
   { label: '0.3', val: 2 },
   { label: '0.5', val: 4 },
@@ -147,6 +162,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const [fontAnchor, setFontAnchor] = useState<HTMLElement | null>(null);
   const [hexDraft, setHexDraft] = useState('');
   const [showStencilMenu, setShowStencilMenu] = useState(false);
+  const [showExtras, setShowExtras] = useState(false);
+  const [extrasAnchor, setExtrasAnchor] = useState<HTMLElement | null>(null);
   const [stencilAnchor, setStencilAnchor] = useState<HTMLElement | null>(null);
   const [presets, setPresets] = useState<PenPreset[]>(() => PenPresets.load());
   const [recentColors, setRecentColors] = useState<string[]>(() => PenPresets.loadRecentColors());
@@ -217,7 +234,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       </div>
 
       {/* ---------- 2. Tuỳ chọn theo công cụ đang chọn ---------- */}
-      <div className="flex-1 min-w-0 flex items-center gap-2.5 overflow-x-auto">
+      <div
+        className="flex-1 flex items-center gap-2.5 overflow-x-auto"
+        // Bảng màu và cỡ nét là thứ dùng liên tục, phải luôn còn chỗ.
+        // min-w-0 cũ cho phép vùng này co về 0 và biến mất hoàn toàn.
+        style={{ minWidth: '210px' }}
+      >
         {/* Màu hiện tại — bấm để mở hộp chọn màu */}
         {showColors && (
           <div className="chrome-group flex items-center gap-1.5 px-2 py-1.5 shrink-0">
@@ -576,7 +598,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* Chống tì tay */}
         <button
           onClick={onTogglePalmRejection}
-          className={`flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold border transition ${
+          className={`w-9 h-9 rounded-xl flex items-center justify-center border transition ${
             palmRejectionActive
               ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
               : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800'
@@ -588,7 +610,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           }
         >
           <ShieldCheck className={`w-4 h-4 ${palmRejectionActive ? 'text-emerald-600' : 'text-slate-400'}`} />
-          <span className="hidden xl:inline">{palmRejectionActive ? 'Chỉ bút' : 'Tay + bút'}</span>
         </button>
 
         {/* Zoom & canh trang */}
@@ -606,52 +627,58 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <button onClick={onZoomIn} className="chrome-btn w-8 h-8" title="Phóng to">
             <ZoomIn className="w-3.5 h-3.5" />
           </button>
-          <div className="w-px h-4 bg-slate-200 mx-0.5" />
-          <button onClick={onFitWidth} className="chrome-btn w-8 h-8" title="Vừa chiều ngang trang">
-            <StretchHorizontal className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={onFitPage} className="chrome-btn w-8 h-8" title="Vừa toàn bộ trang">
-            <Scan className="w-3.5 h-3.5" />
-          </button>
         </div>
 
-        {/* Đảo màu ban đêm */}
+        {/* Menu tràn: gom các thao tác thỉnh thoảng mới dùng.
+            Bốn nút này trước đây nằm thẳng trên thanh và chiếm ~150px, đủ để
+            đẩy toàn bộ vùng chọn màu ra khỏi màn hình trên máy hẹp. */}
         <button
-          onClick={onToggleNightMode}
+          ref={setExtrasAnchor}
+          onClick={() => setShowExtras(!showExtras)}
           className={`chrome-btn w-9 h-9 border ${
-            nightMode ? 'bg-slate-900 text-amber-300 border-slate-900' : 'border-slate-200'
+            showExtras || nightMode ? 'bg-indigo-50 text-indigo-700 border-indigo-300' : 'border-slate-200'
           }`}
-          title="Đảo màu trang để đọc và viết ban đêm — chỉ đổi cách hiển thị, không đụng vào dữ liệu"
+          title="Thêm: đảo màu ban đêm, trình chiếu, bản đồ ghi chú, thống kê"
         >
-          <Moon className="w-4 h-4" />
+          <MoreHorizontal className="w-4 h-4" />
         </button>
 
-        {/* Trình chiếu */}
-        <button
-          onClick={onTogglePresentMode}
-          className="chrome-btn w-9 h-9 border border-slate-200"
-          title="Trình chiếu: ẩn hết thanh công cụ, bút thành con trỏ laser (Esc để thoát)"
+        <FloatingPanel
+          anchor={extrasAnchor}
+          open={showExtras}
+          onClose={() => setShowExtras(false)}
+          width={252}
+          align="right"
         >
-          <Presentation className="w-4 h-4" />
-        </button>
-
-        {/* Bản đồ liên kết */}
-        <button
-          onClick={onOpenGraph}
-          className="chrome-btn w-9 h-9 border border-slate-200"
-          title="Bản đồ ghi chú: các trang nối với nhau qua liên kết [[...]]"
-        >
-          <Network className="w-4 h-4" />
-        </button>
-
-        {/* Thống kê thói quen */}
-        <button
-          onClick={onOpenStats}
-          className="chrome-btn w-9 h-9 border border-slate-200"
-          title="Thói quen ghi chép: chuỗi ngày viết, lịch nhiệt, tổng nét"
-        >
-          <BarChart3 className="w-4 h-4" />
-        </button>
+          <div className="p-1.5">
+            {EXTRAS.map(({ id, icon: Icon, name, hint }) => {
+              const active = id === 'night' && nightMode;
+              return (
+                <button
+                  key={id}
+                  onClick={() => {
+                    setShowExtras(false);
+                    if (id === 'fitWidth') onFitWidth();
+                    else if (id === 'fitPage') onFitPage();
+                    else if (id === 'night') onToggleNightMode();
+                    else if (id === 'present') onTogglePresentMode();
+                    else if (id === 'graph') onOpenGraph();
+                    else onOpenStats();
+                  }}
+                  className={`w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl transition text-left ${
+                    active ? 'bg-indigo-50 ring-1 ring-indigo-200' : 'hover:bg-slate-50'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-indigo-600' : 'text-slate-400'}`} />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-slate-800">{name}</p>
+                    <p className="text-[11px] text-slate-500 leading-snug">{hint}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </FloatingPanel>
 
         {/* Thu gọn thanh công cụ */}
         <button
